@@ -1,0 +1,9 @@
+{
+  "version": "core-lite",
+  "name": "JARVIS Core Lite",
+  "profile": "core_lite",
+  "log_level": "INFO",
+  "plugins_dir": "plugins",
+  "server_enabled": false,
+  "gui_enabled": false
+}
