@@ -1,0 +1,38 @@
+{
+  "schema_version": "1",
+  "id": "open_interpreter",
+  "name": "Open Interpreter Plugin",
+  "version": "1.0.0",
+  "capabilities": [
+    "code_execution",
+    "filesystem_read",
+    "filesystem_write"
+  ],
+  "actions": [
+    {
+      "name": "run_python",
+      "capability": "code_execution",
+      "description": "Ejecuta fragmentos de código Python en entorno aislado con timeout y control de red"
+    },
+    {
+      "name": "write_file",
+      "capability": "filesystem_write",
+      "description": "Escribe un archivo dentro del sandbox con validación estricta de rutas y extensiones"
+    },
+    {
+      "name": "read_file",
+      "capability": "filesystem_read",
+      "description": "Lee el contenido de un archivo dentro del sandbox autorizado"
+    },
+    {
+      "name": "create_presentation",
+      "capability": "filesystem_write",
+      "description": "Crea una presentación PPTX estructurada con python-pptx dentro del sandbox"
+    },
+    {
+      "name": "search_local_files",
+      "capability": "filesystem_read",
+      "description": "Busca archivos dentro del sandbox acotado al root autorizado sin escapar"
+    }
+  ]
+}
