@@ -191,6 +191,14 @@ class PluginLoader:
         self.register_plugin_actions(manifest, module=module)
         return True
 
+    def load(
+        self,
+        plugin_dir: Path | str,
+        version_profile: Optional[str] = None,
+    ) -> bool:
+        """Alias para load_from_directory."""
+        return self.load_from_directory(plugin_dir, version_profile=version_profile)
+
     def register_programmatic_plugin(
         self,
         manifest_data: Dict[str, Any],

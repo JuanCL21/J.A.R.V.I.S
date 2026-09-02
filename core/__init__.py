@@ -13,6 +13,7 @@ from .version_profiles import (
     VERSION_PROFILES,
     get_profile_capabilities,
     is_capability_allowed,
+    register_profile,
 )
 from .audit_log import AuditLogger, default_audit_logger
 from .sandbox import (

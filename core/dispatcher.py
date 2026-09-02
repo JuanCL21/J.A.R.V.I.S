@@ -91,12 +91,12 @@ class Dispatcher:
                 capability=None,
                 allowed=False,
                 result_status="denied",
-                reason="action_not_found",
+                reason="action_not_declared",
                 details={"params": params},
             )
             return {
                 "ok": False,
-                "reason": "action_not_found",
+                "reason": "action_not_declared",
                 "action": action_full_name,
             }
 

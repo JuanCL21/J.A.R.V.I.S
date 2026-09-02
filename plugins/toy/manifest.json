@@ -1,0 +1,16 @@
+{
+  "schema_version": "1",
+  "id": "toy",
+  "name": "Toy Plugin",
+  "version": "1.0.0",
+  "capabilities": [
+    "system_info"
+  ],
+  "actions": [
+    {
+      "name": "get_time",
+      "capability": "system_info",
+      "description": "Devuelve la fecha y hora actual del sistema en formato ISO UTC"
+    }
+  ]
+}

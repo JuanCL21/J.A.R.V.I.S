@@ -69,7 +69,19 @@ def get_profile_capabilities(profile_name: str) -> FrozenSet[str]:
     return VERSION_PROFILES[profile_name]
 
 
+def register_profile(name: str, capabilities: Set[str] | FrozenSet[str] | list) -> None:
+    """Registra o actualiza un perfil de versión (útil para perfiles personalizados o pruebas)."""
+    caps_set = set(capabilities)
+    unknown = caps_set - VALID_CAPABILITIES
+    if unknown:
+        raise ValueError(f"Perfil '{name}' contiene capacidades inválidas: {unknown}")
+    frozen_caps = frozenset(caps_set)
+    VERSION_PROFILES[name] = frozen_caps
+    VERSION_PROFILES[name.replace("_", "-")] = frozen_caps
+
+
 def is_capability_allowed(profile_name: str, capability: str) -> bool:
     """Verifica si una capacidad está permitida en un perfil de versión."""
     caps = get_profile_capabilities(profile_name)
     return capability in caps
+
