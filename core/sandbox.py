@@ -1,16 +1,20 @@
 """
 Gestión de sandboxing y validación estricta de rutas de archivos.
-Revisión de auditor:
-- _SENSITIVE_SUBDIRS presente desde el día uno.
+Revisión de auditor y seguridad:
+- Raíz de sandbox configurable de forma explícita (variable de entorno JARVIS_SANDBOX_ROOT
+  o inicialización explícita), NUNCA implícita del directorio de trabajo (os.getcwd()).
+- Allowlist de extensiones seguras por defecto (DEFAULT_ALLOWED_EXTENSIONS) en is_safe_path()
+  si el llamador no especifica una lista propia, previniendo comportamientos de blacklist pura.
+- _SENSITIVE_SUBDIRS y _SENSITIVE_PATTERNS protegen estructuralmente credenciales (.env, credentials.json),
+  llaves SSH (.ssh, id_rsa), configuraciones de nube (.aws, .kube) y perfiles de navegadores.
 - sandbox_root ignora rutas libres pasadas por plugins (ej. /etc) y resuelve únicamente contra raíces fijas autorizadas.
-- is_safe_path() valida confinamiento de ruta y protección contra path traversal.
 """
 
 import os
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Set
 
-# Subdirectorios y archivos sensibles protegidos estructuralmente
+# Subdirectorios, archivos y patrones sensibles protegidos estructuralmente
 _SENSITIVE_SUBDIRS: Set[str] = {
     ".ssh",
     ".aws",
@@ -25,31 +29,81 @@ _SENSITIVE_SUBDIRS: Set[str] = {
     ".config/microsoft-edge",
     ".git",
     ".env",
+    "credentials.json",
+    "id_rsa",
+    "id_ed25519",
 }
 
-# Raíz de sandbox por defecto del proyecto
-DEFAULT_SANDBOX_BASE = Path(os.getcwd()).resolve()
+# Allowlist de extensiones seguras por defecto (Opción B: protege contra archivos ejecutables/secretos)
+# Archivos .env o credentials.json son bloqueados estructuralmente.
+DEFAULT_ALLOWED_EXTENSIONS: Set[str] = {
+    ".txt",
+    ".md",
+    ".py",
+    ".pptx",
+    ".csv",
+    ".log",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".pdf",
+}
+
+# Raíz canónica del repositorio (ubicación del proyecto, fija e independiente de cwd)
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Variable global para anular programáticamente la raíz por defecto
+_CUSTOM_DEFAULT_SANDBOX_ROOT: Optional[Path] = None
+
+
+def get_default_sandbox_base() -> Path:
+    """
+    Obtiene la raíz de sandbox por defecto del sistema según la siguiente prioridad:
+    1. Anulación programática explícita (set_default_sandbox_root).
+    2. Variable de entorno JARVIS_SANDBOX_ROOT.
+    3. Raíz fija del proyecto (_REPO_ROOT).
+    NUNCA depende de os.getcwd().
+    """
+    if _CUSTOM_DEFAULT_SANDBOX_ROOT is not None:
+        return _CUSTOM_DEFAULT_SANDBOX_ROOT.resolve()
+
+    env_root = os.environ.get("JARVIS_SANDBOX_ROOT")
+    if env_root:
+        return Path(env_root).resolve()
+
+    return _REPO_ROOT.resolve()
+
+
+def set_default_sandbox_root(path: Optional[Path | str]) -> None:
+    """Configura explícitamente la raíz por defecto del sandbox."""
+    global _CUSTOM_DEFAULT_SANDBOX_ROOT
+    if path is None:
+        _CUSTOM_DEFAULT_SANDBOX_ROOT = None
+    else:
+        _CUSTOM_DEFAULT_SANDBOX_ROOT = Path(path).resolve()
+    reset_authorized_roots()
+
 
 # Registro de raíces de sandbox autorizadas (valores fijos permitidos)
-_AUTHORIZED_ROOTS: Dict[str, Path] = {
-    "default": DEFAULT_SANDBOX_BASE,
-    "workspace": DEFAULT_SANDBOX_BASE,
-    "temp": DEFAULT_SANDBOX_BASE / "temp",
-}
+_AUTHORIZED_ROOTS: Dict[str, Path] = {}
+
+
+def reset_authorized_roots(base_path: Optional[Path | str] = None) -> None:
+    """Restablece el registro de raíces autorizadas a sus valores predeterminados."""
+    base = Path(base_path).resolve() if base_path else get_default_sandbox_base()
+    _AUTHORIZED_ROOTS.clear()
+    _AUTHORIZED_ROOTS["default"] = base
+    _AUTHORIZED_ROOTS["workspace"] = base
+    _AUTHORIZED_ROOTS["temp"] = base / "temp"
+
+
+# Inicialización de raíces autorizadas
+reset_authorized_roots()
 
 
 def register_authorized_root(alias: str, path: Path | str) -> None:
     """Registra una raíz fija autorizada (para pruebas o configuración inicial)."""
     _AUTHORIZED_ROOTS[alias] = Path(path).resolve()
-
-
-def reset_authorized_roots(base_path: Optional[Path | str] = None) -> None:
-    """Restablece el registro de raíces autorizadas a sus valores predeterminados."""
-    base = Path(base_path).resolve() if base_path else Path(os.getcwd()).resolve()
-    _AUTHORIZED_ROOTS.clear()
-    _AUTHORIZED_ROOTS["default"] = base
-    _AUTHORIZED_ROOTS["workspace"] = base
-    _AUTHORIZED_ROOTS["temp"] = base / "temp"
 
 
 def resolve_sandbox_root(requested_root: Optional[str | Path] = None) -> Path:
@@ -59,8 +113,11 @@ def resolve_sandbox_root(requested_root: Optional[str | Path] = None) -> Path:
     Si pasa una ruta libre/arbitraria no autorizada (ej. '/etc', '/root'), se IGNORA y se
     retorna la raíz autorizada predeterminada ('default').
     """
+    if not _AUTHORIZED_ROOTS:
+        reset_authorized_roots()
+
     if requested_root is None:
-        return _AUTHORIZED_ROOTS["default"]
+        return _AUTHORIZED_ROOTS.get("default", get_default_sandbox_base())
 
     req_str = str(requested_root)
 
@@ -78,7 +135,7 @@ def resolve_sandbox_root(requested_root: Optional[str | Path] = None) -> Path:
         pass
 
     # Si es una ruta libre no autorizada (ej. /etc), se ignora y se devuelve el valor fijo por defecto
-    return _AUTHORIZED_ROOTS["default"]
+    return _AUTHORIZED_ROOTS.get("default", get_default_sandbox_base())
 
 
 def is_safe_path(
@@ -89,8 +146,11 @@ def is_safe_path(
     """
     Verifica que la ruta objetivo:
     1. Se encuentre estrictamente confinada dentro de sandbox_root (sin escapar vía '..').
-    2. No acceda a ningún directorio o archivo en _SENSITIVE_SUBDIRS.
-    3. (Opcional) Cumpla con la lista de extensiones permitidas.
+    2. No acceda a ningún directorio o archivo en _SENSITIVE_SUBDIRS (incluye .env, credentials.json, .ssh, etc.).
+    3. Cumpla con una lista de extensiones permitidas:
+       - Si allowed_extensions se especifica, se valida contra dicha lista.
+       - Si allowed_extensions es None, se aplica la allowlist por defecto DEFAULT_ALLOWED_EXTENSIONS
+         (Decisión de diseño: Opción B, garantizando que nunca opere como blacklist pura).
     """
     try:
         root = resolve_sandbox_root(sandbox_root).resolve()
@@ -110,25 +170,27 @@ def is_safe_path(
             return False
 
         # 2. Comprobación contra subdirectorios/archivos sensibles
-        # Revisamos las partes del path resuelto
+        # Revisamos partes y nombre exacto del archivo
         target_parts = set(resolved_target.parts)
+        filename = resolved_target.name
+
         for sensitive in _SENSITIVE_SUBDIRS:
             if "/" in sensitive:
                 # Caso de subdirectorios compuestos como .config/google-chrome
                 if sensitive in str(resolved_target):
                     return False
             else:
-                if sensitive in target_parts:
+                if sensitive in target_parts or filename == sensitive:
                     return False
 
-        # 3. Allowlist de extensiones (si se especifica)
-        if allowed_extensions is not None:
-            normalized_allowed = {
-                ext.lower() if ext.startswith(".") else f".{ext.lower()}"
-                for ext in allowed_extensions
-            }
-            if resolved_target.suffix.lower() not in normalized_allowed:
-                return False
+        # 3. Allowlist de extensiones (por defecto DEFAULT_ALLOWED_EXTENSIONS si None)
+        effective_allowed = allowed_extensions if allowed_extensions is not None else DEFAULT_ALLOWED_EXTENSIONS
+        normalized_allowed = {
+            ext.lower() if ext.startswith(".") else f".{ext.lower()}"
+            for ext in effective_allowed
+        }
+        if resolved_target.suffix.lower() not in normalized_allowed:
+            return False
 
         return True
 

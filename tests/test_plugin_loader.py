@@ -189,7 +189,8 @@ def test_nuc_04_sandbox_root_ignores_free_path_and_resolves_fixed(tmp_path: Path
     NUC-04: Si un plugin o llamador intenta pasar una ruta libre arbitraria como
     sandbox_root (ej. '/etc' o '/root'), el núcleo la ignora y resuelve estrictamente
     hacia las raíces autorizadas fijas.
-    Además, _SENSITIVE_SUBDIRS protege directorios críticos como .ssh o .aws.
+    Además, _SENSITIVE_SUBDIRS y allowlist por defecto protegen directorios y archivos
+    críticos (.env, credentials.json, .ssh, etc.) incluso sin especificar allowed_extensions.
     """
     workspace = tmp_path / "safe_workspace"
     workspace.mkdir()
@@ -201,8 +202,9 @@ def test_nuc_04_sandbox_root_ignores_free_path_and_resolves_fixed(tmp_path: Path
     assert resolved == workspace.resolve()
     assert resolved != Path("/etc").resolve()
 
-    # 2. is_safe_path() no debe permitir rutas fuera del sandbox ni subdirectorios sensibles
+    # 2. is_safe_path() permite archivos seguros con allowlist por defecto
     assert is_safe_path(workspace / "valid.txt", sandbox_root=workspace) is True
+    assert is_safe_path(workspace / "script.py", sandbox_root=workspace) is True
     assert is_safe_path("/etc/passwd", sandbox_root=workspace) is False
     assert is_safe_path(workspace / "../escaped.txt", sandbox_root=workspace) is False
 
@@ -210,6 +212,34 @@ def test_nuc_04_sandbox_root_ignores_free_path_and_resolves_fixed(tmp_path: Path
     for sensitive in [".ssh", ".aws", ".gnupg", ".docker", ".kube", ".password-store"]:
         sensitive_path = workspace / sensitive / "id_rsa"
         assert is_safe_path(sensitive_path, sandbox_root=workspace) is False
+
+    # 4. Archivos de secretos/credenciales bloqueados DENTRO del sandbox sin pasar allowed_extensions
+    assert is_safe_path(workspace / ".env", sandbox_root=workspace) is False
+    assert is_safe_path(workspace / "credentials.json", sandbox_root=workspace) is False
+    assert is_safe_path(workspace / "subdir" / ".env", sandbox_root=workspace) is False
+    assert is_safe_path(workspace / "nested" / "credentials.json", sandbox_root=workspace) is False
+
+
+def test_sandbox_root_independent_of_process_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """
+    Verifica que cambiar el cwd del proceso NO altera la raíz del sandbox
+    cuando se define explícitamente vía JARVIS_SANDBOX_ROOT o configuración.
+    """
+    explicit_root = tmp_path / "explicit_sandbox_root"
+    other_cwd = tmp_path / "completely_unrelated_dir"
+    explicit_root.mkdir()
+    other_cwd.mkdir()
+
+    # Configurar variable de entorno explícita
+    monkeypatch.setenv("JARVIS_SANDBOX_ROOT", str(explicit_root))
+    reset_authorized_roots()
+
+    # Cambiar cwd del proceso a otro directorio
+    monkeypatch.chdir(other_cwd)
+
+    resolved = resolve_sandbox_root()
+    assert resolved == explicit_root.resolve()
+    assert resolved != other_cwd.resolve()
 
 
 # ============================================================================

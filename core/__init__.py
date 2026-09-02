@@ -18,6 +18,9 @@ from .version_profiles import (
 from .audit_log import AuditLogger, default_audit_logger
 from .sandbox import (
     _SENSITIVE_SUBDIRS,
+    DEFAULT_ALLOWED_EXTENSIONS,
+    get_default_sandbox_base,
+    set_default_sandbox_root,
     resolve_sandbox_root,
     is_safe_path,
     register_authorized_root,
