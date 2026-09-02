@@ -1,0 +1,33 @@
+# Entorno y variables secretas
+.env
+.env.*
+!.env.example
+
+# Bytecode y caches de Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Bases de datos SQLite
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+ENV/
+
+# IDEs y editores
+.idea/
+.vscode/
+*.swp
+*.swo
