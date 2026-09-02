@@ -16,9 +16,10 @@ htmlcov/
 *.sqlite
 *.sqlite3
 
-# Logs
+# Logs y sandbox
 logs/
 *.log
+sandbox/
 
 # Entornos virtuales
 venv/

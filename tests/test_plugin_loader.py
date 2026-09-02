@@ -223,6 +223,12 @@ def test_nuc_04_sandbox_root_ignores_free_path_and_resolves_fixed(tmp_path: Path
     assert is_safe_path(workspace / "subdir" / ".env", sandbox_root=workspace) is False
     assert is_safe_path(workspace / "nested" / "credentials.json", sandbox_root=workspace) is False
 
+    # 5. Aislamiento de nombre sensible con extensiones SÍ permitidas (.txt, .py, .md)
+    assert is_safe_path(workspace / "my_credentials.txt", sandbox_root=workspace) is False
+    assert is_safe_path(workspace / "id_rsa_backup.py", sandbox_root=workspace) is False
+    assert is_safe_path(workspace / "notes_credentials.md", sandbox_root=workspace) is False
+    assert is_safe_path(workspace / "meeting_notes.txt", sandbox_root=workspace) is True  # Caso de control
+
 
 def test_sandbox_root_independent_of_process_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """
