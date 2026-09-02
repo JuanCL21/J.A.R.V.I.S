@@ -4,6 +4,7 @@
   "profile": "core_lite",
   "log_level": "INFO",
   "plugins_dir": "plugins",
+  "sandbox_root": "sandbox",
   "server_enabled": false,
   "gui_enabled": false
 }

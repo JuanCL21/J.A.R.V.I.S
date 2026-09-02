@@ -215,7 +215,11 @@ def test_nuc_04_sandbox_root_ignores_free_path_and_resolves_fixed(tmp_path: Path
 
     # 4. Archivos de secretos/credenciales bloqueados DENTRO del sandbox sin pasar allowed_extensions
     assert is_safe_path(workspace / ".env", sandbox_root=workspace) is False
+    assert is_safe_path(workspace / ".env.production", sandbox_root=workspace) is False
+    assert is_safe_path(workspace / ".env.local", sandbox_root=workspace) is False
     assert is_safe_path(workspace / "credentials.json", sandbox_root=workspace) is False
+    assert is_safe_path(workspace / "credentials_prod.json", sandbox_root=workspace) is False
+    assert is_safe_path(workspace / "my_credentials.json", sandbox_root=workspace) is False
     assert is_safe_path(workspace / "subdir" / ".env", sandbox_root=workspace) is False
     assert is_safe_path(workspace / "nested" / "credentials.json", sandbox_root=workspace) is False
 
@@ -225,12 +229,15 @@ def test_sandbox_root_independent_of_process_cwd(tmp_path: Path, monkeypatch: py
     Verifica que cambiar el cwd del proceso NO altera la raíz del sandbox
     cuando se define explícitamente vía JARVIS_SANDBOX_ROOT o configuración.
     """
+    from core.sandbox import set_default_sandbox_root
+
     explicit_root = tmp_path / "explicit_sandbox_root"
     other_cwd = tmp_path / "completely_unrelated_dir"
     explicit_root.mkdir()
     other_cwd.mkdir()
 
-    # Configurar variable de entorno explícita
+    # Limpiar custom root previo y configurar variable de entorno explícita
+    set_default_sandbox_root(None)
     monkeypatch.setenv("JARVIS_SANDBOX_ROOT", str(explicit_root))
     reset_authorized_roots()
 
@@ -240,6 +247,35 @@ def test_sandbox_root_independent_of_process_cwd(tmp_path: Path, monkeypatch: py
     resolved = resolve_sandbox_root()
     assert resolved == explicit_root.resolve()
     assert resolved != other_cwd.resolve()
+
+
+def test_sandbox_root_default_repo_root_independent_of_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """
+    Verifica que sin JARVIS_SANDBOX_ROOT seteada ni config programática,
+    la raíz por defecto es _REPO_ROOT (calculada desde __file__) y cambiar el
+    cwd con monkeypatch.chdir() NO altera la raíz resuelta.
+    """
+    from core.sandbox import _REPO_ROOT, get_default_sandbox_base, set_default_sandbox_root
+
+    # Asegurar que no hay variable de entorno ni custom root activo
+    monkeypatch.delenv("JARVIS_SANDBOX_ROOT", raising=False)
+    set_default_sandbox_root(None)
+    reset_authorized_roots()
+
+    # Raíz esperada es _REPO_ROOT
+    assert get_default_sandbox_base() == _REPO_ROOT.resolve()
+    assert resolve_sandbox_root() == _REPO_ROOT.resolve()
+
+    # Cambiar cwd a un directorio temporal cualquiera
+    other_dir = tmp_path / "somewhere_else"
+    other_dir.mkdir()
+    monkeypatch.chdir(other_dir)
+
+    # La raíz resuelta sigue siendo _REPO_ROOT y NO el nuevo cwd
+    assert resolve_sandbox_root() == _REPO_ROOT.resolve()
+    assert resolve_sandbox_root() != other_dir.resolve()
 
 
 # ============================================================================

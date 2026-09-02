@@ -16,10 +16,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import os
 from core.audit_log import AuditLogger, default_audit_logger
 from core.dispatcher import Dispatcher
 from core.logging_setup import get_logger, setup_logging
 from core.plugin_loader import PluginLoader
+from core.sandbox import set_default_sandbox_root
 
 CONFIG_FILE = Path(__file__).parent / "config.json"
 DEFAULT_PROFILE = "core_lite"
@@ -51,9 +53,17 @@ def start_core_lite(
     config = load_config(config_path)
     profile = config.get("profile", DEFAULT_PROFILE)
 
-    # 1. Configurar logging estructurado
+    # 1. Configurar logging estructurado y sandbox explícito
     setup_logging()
-    logger.info("Iniciando JARVIS Core Lite [perfil: %s]...", profile)
+    sandbox_cfg = config.get("sandbox_root", "sandbox")
+    sandbox_path = Path(sandbox_cfg)
+    if not sandbox_path.is_absolute():
+        sandbox_path = REPO_ROOT / sandbox_path
+    sandbox_path.mkdir(parents=True, exist_ok=True)
+    os.environ["JARVIS_SANDBOX_ROOT"] = str(sandbox_path.resolve())
+    set_default_sandbox_root(sandbox_path)
+
+    logger.info("Iniciando JARVIS Core Lite [perfil: %s, sandbox: %s]...", profile, sandbox_path)
 
     # 2. Inicializar componentes del núcleo
     active_audit_logger = audit_logger or default_audit_logger

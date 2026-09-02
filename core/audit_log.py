@@ -2,6 +2,7 @@
 Registro de auditoría persistente en SQLite (database/jarvis.db).
 Revisión de auditor: Cada invoke() — permitido o denegado — se escribe a SQLite,
 garantizando trazabilidad inmutable y consultable.
+Manejo explícito de conexiones con cierre garantizado (try/finally).
 """
 
 import json
@@ -23,23 +24,26 @@ class AuditLogger:
 
     def _ensure_db(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._get_connection() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS audit_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    plugin_id TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    capability TEXT,
-                    allowed INTEGER NOT NULL,
-                    result_status TEXT NOT NULL,
-                    reason TEXT,
-                    details TEXT
+        conn = self._get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS audit_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT NOT NULL,
+                        plugin_id TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        capability TEXT,
+                        allowed INTEGER NOT NULL,
+                        result_status TEXT NOT NULL,
+                        reason TEXT,
+                        details TEXT
+                    )
+                    """
                 )
-                """
-            )
-            conn.commit()
+        finally:
+            conn.close()
 
     def log_invocation(
         self,
@@ -51,7 +55,7 @@ class AuditLogger:
         reason: Optional[str] = None,
         details: Optional[Dict[str, Any] | str] = None,
     ) -> int:
-        """Registra un intento de invocación de acción en la base de datos."""
+        """Registra un intento de invocación de acción en la base de datos con cierre garantizado de conexión."""
         ts = datetime.now(timezone.utc).isoformat()
         details_str = (
             json.dumps(details, ensure_ascii=False)
@@ -59,33 +63,36 @@ class AuditLogger:
             else (str(details) if details is not None else None)
         )
 
-        with self._get_connection() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO audit_logs (
-                    timestamp, plugin_id, action, capability, allowed, result_status, reason, details
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    ts,
-                    plugin_id,
-                    action,
-                    capability,
-                    1 if allowed else 0,
-                    result_status,
-                    reason,
-                    details_str,
-                ),
-            )
-            conn.commit()
-            return cursor.lastrowid or 0
+        conn = self._get_connection()
+        try:
+            with conn:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO audit_logs (
+                        timestamp, plugin_id, action, capability, allowed, result_status, reason, details
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        ts,
+                        plugin_id,
+                        action,
+                        capability,
+                        1 if allowed else 0,
+                        result_status,
+                        reason,
+                        details_str,
+                    ),
+                )
+                return cursor.lastrowid or 0
+        finally:
+            conn.close()
 
     def query_logs(
         self,
         plugin_id: Optional[str] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
-        """Consulta los registros de auditoría más recientes."""
+        """Consulta los registros de auditoría más recientes con cierre garantizado de conexión."""
         query = "SELECT * FROM audit_logs"
         params: list[Any] = []
         if plugin_id:
@@ -94,9 +101,12 @@ class AuditLogger:
         query += " ORDER BY id DESC LIMIT ?"
         params.append(limit)
 
-        with self._get_connection() as conn:
+        conn = self._get_connection()
+        try:
             rows = conn.execute(query, params).fetchall()
             return [dict(row) for row in rows]
+        finally:
+            conn.close()
 
 
 # Instancia por defecto para el núcleo

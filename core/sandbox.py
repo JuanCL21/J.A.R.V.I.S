@@ -5,8 +5,8 @@ Revisión de auditor y seguridad:
   o inicialización explícita), NUNCA implícita del directorio de trabajo (os.getcwd()).
 - Allowlist de extensiones seguras por defecto (DEFAULT_ALLOWED_EXTENSIONS) en is_safe_path()
   si el llamador no especifica una lista propia, previniendo comportamientos de blacklist pura.
-- _SENSITIVE_SUBDIRS y _SENSITIVE_PATTERNS protegen estructuralmente credenciales (.env, credentials.json),
-  llaves SSH (.ssh, id_rsa), configuraciones de nube (.aws, .kube) y perfiles de navegadores.
+- _SENSITIVE_SUBDIRS y patrones sensibles protegen estructuralmente credenciales (.env*, *credentials*),
+  llaves SSH (.ssh, id_rsa*), configuraciones de nube (.aws, .kube) y perfiles de navegadores.
 - sandbox_root ignora rutas libres pasadas por plugins (ej. /etc) y resuelve únicamente contra raíces fijas autorizadas.
 """
 
@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Set
 
-# Subdirectorios, archivos y patrones sensibles protegidos estructuralmente
+# Subdirectorios, archivos y patrones sensibles protegidos estructuralmente por prefijo/substring
 _SENSITIVE_SUBDIRS: Set[str] = {
     ".ssh",
     ".aws",
@@ -29,13 +29,12 @@ _SENSITIVE_SUBDIRS: Set[str] = {
     ".config/microsoft-edge",
     ".git",
     ".env",
-    "credentials.json",
+    "credentials",
     "id_rsa",
     "id_ed25519",
 }
 
 # Allowlist de extensiones seguras por defecto (Opción B: protege contra archivos ejecutables/secretos)
-# Archivos .env o credentials.json son bloqueados estructuralmente.
 DEFAULT_ALLOWED_EXTENSIONS: Set[str] = {
     ".txt",
     ".md",
@@ -49,7 +48,7 @@ DEFAULT_ALLOWED_EXTENSIONS: Set[str] = {
     ".pdf",
 }
 
-# Raíz canónica del repositorio (ubicación del proyecto, fija e independiente de cwd)
+# Raíz canónica del repositorio calculada a partir de __file__, NUNCA de os.getcwd()
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Variable global para anular programáticamente la raíz por defecto
@@ -61,7 +60,7 @@ def get_default_sandbox_base() -> Path:
     Obtiene la raíz de sandbox por defecto del sistema según la siguiente prioridad:
     1. Anulación programática explícita (set_default_sandbox_root).
     2. Variable de entorno JARVIS_SANDBOX_ROOT.
-    3. Raíz fija del proyecto (_REPO_ROOT).
+    3. Raíz fija del proyecto (_REPO_ROOT calculada desde __file__).
     NUNCA depende de os.getcwd().
     """
     if _CUSTOM_DEFAULT_SANDBOX_ROOT is not None:
@@ -146,7 +145,8 @@ def is_safe_path(
     """
     Verifica que la ruta objetivo:
     1. Se encuentre estrictamente confinada dentro de sandbox_root (sin escapar vía '..').
-    2. No acceda a ningún directorio o archivo en _SENSITIVE_SUBDIRS (incluye .env, credentials.json, .ssh, etc.).
+    2. No acceda a ningún directorio o archivo en _SENSITIVE_SUBDIRS
+       (coincidencia por partes, prefijo y substring: .env*, *credentials*, id_rsa*, etc.).
     3. Cumpla con una lista de extensiones permitidas:
        - Si allowed_extensions se especifica, se valida contra dicha lista.
        - Si allowed_extensions es None, se aplica la allowlist por defecto DEFAULT_ALLOWED_EXTENSIONS
@@ -169,18 +169,22 @@ def is_safe_path(
             # Está fuera del sandbox root
             return False
 
-        # 2. Comprobación contra subdirectorios/archivos sensibles
-        # Revisamos partes y nombre exacto del archivo
+        # 2. Comprobación contra subdirectorios/archivos sensibles por substring y prefijo
+        target_str = str(resolved_target)
         target_parts = set(resolved_target.parts)
-        filename = resolved_target.name
+        filename_lower = resolved_target.name.lower()
 
         for sensitive in _SENSITIVE_SUBDIRS:
-            if "/" in sensitive:
+            sensitive_lower = sensitive.lower()
+            if "/" in sensitive_lower:
                 # Caso de subdirectorios compuestos como .config/google-chrome
-                if sensitive in str(resolved_target):
+                if sensitive_lower in target_str.lower():
                     return False
             else:
-                if sensitive in target_parts or filename == sensitive:
+                # Comprobar si el nombre del archivo o alguna parte contiene el patrón sensible
+                if sensitive_lower in filename_lower:
+                    return False
+                if any(sensitive_lower in part.lower() for part in target_parts):
                     return False
 
         # 3. Allowlist de extensiones (por defecto DEFAULT_ALLOWED_EXTENSIONS si None)
