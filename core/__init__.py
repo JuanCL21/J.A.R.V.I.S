@@ -1,0 +1,55 @@
+"""
+JARVIS Core Package.
+"""
+
+from .capability_catalog import (
+    CAPABILITY_CATALOG,
+    VALID_CAPABILITIES,
+    is_valid_capability,
+    capability_requires_confirmation,
+    validate_capabilities,
+)
+from .version_profiles import (
+    VERSION_PROFILES,
+    get_profile_capabilities,
+    is_capability_allowed,
+)
+from .audit_log import AuditLogger, default_audit_logger
+from .sandbox import (
+    _SENSITIVE_SUBDIRS,
+    resolve_sandbox_root,
+    is_safe_path,
+    register_authorized_root,
+    reset_authorized_roots,
+)
+from .secrets import load_secrets, get_secret, set_secret
+from .logging_setup import setup_logging, get_logger
+from .plugin_loader import PluginLoader, PluginManifest, ActionDefinition
+from .dispatcher import Dispatcher
+
+__all__ = [
+    "CAPABILITY_CATALOG",
+    "VALID_CAPABILITIES",
+    "is_valid_capability",
+    "capability_requires_confirmation",
+    "validate_capabilities",
+    "VERSION_PROFILES",
+    "get_profile_capabilities",
+    "is_capability_allowed",
+    "AuditLogger",
+    "default_audit_logger",
+    "_SENSITIVE_SUBDIRS",
+    "resolve_sandbox_root",
+    "is_safe_path",
+    "register_authorized_root",
+    "reset_authorized_roots",
+    "load_secrets",
+    "get_secret",
+    "set_secret",
+    "setup_logging",
+    "get_logger",
+    "PluginLoader",
+    "PluginManifest",
+    "ActionDefinition",
+    "Dispatcher",
+]
