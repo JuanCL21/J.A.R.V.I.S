@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from .audit_log import AuditLogger, default_audit_logger
 from .capability_catalog import is_valid_capability, validate_capabilities
 from .version_profiles import get_profile_capabilities, is_capability_allowed
 
@@ -38,10 +39,11 @@ class PluginManifest:
 
 
 class PluginLoader:
-    def __init__(self):
+    def __init__(self, audit_logger: Optional[AuditLogger] = None):
         self.loaded_plugins: Dict[str, PluginManifest] = {}
         # Mapeo de "plugin_id.action_name" -> ActionDefinition
         self.registered_actions: Dict[str, ActionDefinition] = {}
+        self.audit_logger = audit_logger or default_audit_logger
 
     def parse_manifest_dict(self, data: Dict[str, Any]) -> PluginManifest:
         """
@@ -176,7 +178,20 @@ class PluginLoader:
             allowed_caps = get_profile_capabilities(version_profile)
             plugin_caps = set(manifest.capabilities)
             if not plugin_caps.issubset(allowed_caps):
-                # El perfil no tiene suficientes permisos para este plugin
+                denied_caps = list(plugin_caps - allowed_caps)
+                self.audit_logger.log_invocation(
+                    plugin_id=manifest.id,
+                    action="load_plugin",
+                    capability=",".join(sorted(denied_caps)),
+                    allowed=False,
+                    result_status="denied",
+                    reason="capability_denied",
+                    details={
+                        "profile": version_profile,
+                        "plugin_capabilities": manifest.capabilities,
+                        "denied_capabilities": denied_caps,
+                    },
+                )
                 return False
 
         # Cargar plugin.py si existe
@@ -214,6 +229,20 @@ class PluginLoader:
             allowed_caps = get_profile_capabilities(version_profile)
             plugin_caps = set(manifest.capabilities)
             if not plugin_caps.issubset(allowed_caps):
+                denied_caps = list(plugin_caps - allowed_caps)
+                self.audit_logger.log_invocation(
+                    plugin_id=manifest.id,
+                    action="load_plugin",
+                    capability=",".join(sorted(denied_caps)),
+                    allowed=False,
+                    result_status="denied",
+                    reason="capability_denied",
+                    details={
+                        "profile": version_profile,
+                        "plugin_capabilities": manifest.capabilities,
+                        "denied_capabilities": denied_caps,
+                    },
+                )
                 return False
 
         self.register_plugin_actions(manifest, handlers=handlers)

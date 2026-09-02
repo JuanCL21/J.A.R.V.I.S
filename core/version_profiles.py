@@ -11,7 +11,8 @@ from .capability_catalog import VALID_CAPABILITIES
 _BASE_PROFILES: Dict[str, Set[str]] = {
     "core_lite": {
         "system_info",
-        "filesystem_read",
+        "notify_user",
+        "telegram_send",
     },
     "core_full": {
         "system_info",
@@ -22,6 +23,8 @@ _BASE_PROFILES: Dict[str, Set[str]] = {
         "device_management",
         "audio_synthesis",
         "audio_capture",
+        "notify_user",
+        "telegram_send",
     },
     "asistente": {
         "system_info",
@@ -29,6 +32,8 @@ _BASE_PROFILES: Dict[str, Set[str]] = {
         "network_access",
         "audio_synthesis",
         "audio_capture",
+        "notify_user",
+        "telegram_send",
     },
     "local": {
         "system_info",
@@ -38,12 +43,16 @@ _BASE_PROFILES: Dict[str, Set[str]] = {
         "network_access",
         "audio_synthesis",
         "audio_capture",
+        "notify_user",
+        "telegram_send",
     },
     "movil": {
         "system_info",
         "network_access",
         "audio_synthesis",
         "audio_capture",
+        "notify_user",
+        "telegram_send",
     },
 }
 

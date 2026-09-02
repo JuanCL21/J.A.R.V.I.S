@@ -56,6 +56,16 @@ CAPABILITY_CATALOG: Dict[str, CapabilityDefinition] = {
         description="Captura de micrófono y reconocimiento de voz (STT)",
         requires_confirmation=False,
     ),
+    "notify_user": CapabilityDefinition(
+        name="notify_user",
+        description="Envío de notificaciones al usuario local o interfaz activa",
+        requires_confirmation=False,
+    ),
+    "telegram_send": CapabilityDefinition(
+        name="telegram_send",
+        description="Envío de mensajes y alertas a través del bot de Telegram",
+        requires_confirmation=False,
+    ),
 }
 
 VALID_CAPABILITIES: Set[str] = set(CAPABILITY_CATALOG.keys())
