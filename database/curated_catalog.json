@@ -1,0 +1,36 @@
+{
+  "schema_version": "1",
+  "catalog_updated_at": "2026-08-30T00:00:00Z",
+  "plugins": [
+    {
+      "plugin_id": "toy",
+      "name": "Toy Plugin",
+      "description": "Plugin de diagnóstico básico del sistema y consulta de hora UTC",
+      "icon": "clock-outline",
+      "source_url": "https://github.com/jarvis-plugins/toy-plugin.git",
+      "commit_hash": "e2a4b6c8d0e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9",
+      "reviewed_by": "auditor_seguridad_principal",
+      "reviewed_at": "2026-08-15T14:30:00Z"
+    },
+    {
+      "plugin_id": "open_interpreter",
+      "name": "Open Interpreter",
+      "description": "Ejecución de código aislado en Python y manipulación segura de archivos",
+      "icon": "code-braces",
+      "source_url": "https://github.com/jarvis-plugins/open-interpreter.git",
+      "commit_hash": "f1d3b5a7c9e1f3a5b7c9d1e3f5a7b9c1d3e5f7b0",
+      "reviewed_by": "comite_seguridad_fase4",
+      "reviewed_at": "2026-08-20T18:00:00Z"
+    },
+    {
+      "plugin_id": "system_monitor",
+      "name": "Monitor del Sistema",
+      "description": "Telemetría y métricas operativas del host en tiempo real",
+      "icon": "chart-line",
+      "source_url": "https://github.com/jarvis-plugins/system-monitor.git",
+      "commit_hash": "a7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5",
+      "reviewed_by": "auditor_infraestructura",
+      "reviewed_at": "2026-08-25T11:15:00Z"
+    }
+  ]
+}

@@ -31,6 +31,13 @@ from .logging_setup import setup_logging, get_logger
 from .plugin_loader import PluginLoader, PluginManifest, ActionDefinition
 from .dispatcher import Dispatcher
 from .plugin_registry import PluginRegistry, resolve_db_path
+from .plugin_installer import (
+    PluginInstaller,
+    install_from_catalog,
+    install_from_url,
+    resolve_catalog_path,
+    load_curated_catalog,
+)
 
 # TODO: default_plugin_registry a nivel de módulo eliminado para evitar efectos secundarios en imports.
 # Instanciar PluginRegistry explícitamente donde se requiera.
@@ -48,6 +55,11 @@ __all__ = [
     "default_audit_logger",
     "PluginRegistry",
     "resolve_db_path",
+    "PluginInstaller",
+    "install_from_catalog",
+    "install_from_url",
+    "resolve_catalog_path",
+    "load_curated_catalog",
     "_SENSITIVE_SUBDIRS",
     "resolve_sandbox_root",
     "is_safe_path",
