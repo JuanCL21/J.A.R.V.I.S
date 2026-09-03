@@ -30,6 +30,7 @@ from .secrets import load_secrets, get_secret, set_secret
 from .logging_setup import setup_logging, get_logger
 from .plugin_loader import PluginLoader, PluginManifest, ActionDefinition
 from .dispatcher import Dispatcher
+from .plugin_registry import PluginRegistry, default_plugin_registry
 
 __all__ = [
     "CAPABILITY_CATALOG",
@@ -42,6 +43,8 @@ __all__ = [
     "is_capability_allowed",
     "AuditLogger",
     "default_audit_logger",
+    "PluginRegistry",
+    "default_plugin_registry",
     "_SENSITIVE_SUBDIRS",
     "resolve_sandbox_root",
     "is_safe_path",
