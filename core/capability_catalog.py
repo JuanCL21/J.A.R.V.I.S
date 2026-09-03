@@ -36,11 +36,6 @@ CAPABILITY_CATALOG: Dict[str, CapabilityDefinition] = {
         description="Ejecución de código arbitrario o scripts en entorno aislado",
         requires_confirmation=True,
     ),
-    "network_access": CapabilityDefinition(
-        name="network_access",
-        description="Peticiones de red e integración con APIs externas",
-        requires_confirmation=False,
-    ),
     "notify_user": CapabilityDefinition(
         name="notify_user",
         description="Envío de notificaciones al usuario local o interfaz activa",

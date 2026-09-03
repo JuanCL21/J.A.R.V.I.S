@@ -14,13 +14,12 @@ Este bloque detalla exclusivamente las capacidades, plugins, acciones, perfiles 
 
 ### 1. Capacidades del Catálogo Cerrado (`core/capability_catalog.py`)
 
-El sistema cuenta con un catálogo cerrado de siete capacidades reconocidas. Cualquier acción o plugin que declare una capacidad ajena a este catálogo es rechazado inmediatamente durante la fase de carga con un error explícito. En la práctica, cada una habilita lo siguiente:
+El sistema cuenta con un catálogo cerrado de seis capacidades reconocidas. Cualquier acción o plugin que declare una capacidad ajena a este catálogo es rechazado inmediatamente durante la fase de carga con un error explícito. En la práctica, cada una habilita lo siguiente:
 
 - **`system_info`**: Habilita la lectura de información básica del entorno, reloj del sistema en tiempo universal coordinado (UTC) y métricas elementales de estado operativo (no requiere confirmación previa).
 - **`filesystem_read`**: Habilita la inspección y lectura del contenido de archivos de texto confinados estrictamente dentro de la raíz del sandbox autorizado (no requiere confirmación previa).
 - **`filesystem_write`**: Habilita la creación, modificación y almacenamiento de archivos dentro del sandbox, aplicando validación previa de extensiones permitidas y exclusión estricta de nombres y rutas sensibles (requiere confirmación explícita del usuario).
-- **`code_execution`**: Habilita la ejecución de scripts y fragmentos de código Python en procesos aislados del sistema operativo, con límites de tiempo (timeout) y aislamiento de red mediante contenedores ligeros si la plataforma lo soporta (requiere confirmación explícita del usuario).
-- **`network_access`**: Habilita la realización de peticiones de red e integración con servicios y APIs remotas (no requiere confirmación previa).
+- **`code_execution`**: Habilita la ejecución de scripts y fragmentos de código Python en procesos aislados del sistema operativo, con límites de tiempo (timeout) y aislamiento estricto de red mediante contenedores ligeros Bubblewrap bajo política fail-closed (requiere confirmación explícita del usuario).
 - **`notify_user`**: Habilita el despacho de alertas y notificaciones locales directas a la interfaz de usuario activa o al entorno del sistema operativo (no requiere confirmación previa).
 - **`telegram_send`**: Habilita el envío de mensajes, alertas y reportes a través del bot de mensajería de Telegram (no requiere confirmación previa).
 
@@ -38,7 +37,7 @@ Creado como prueba de concepto del ciclo de vida de plugins y verificación del 
 #### Plugin Open Interpreter (`plugins/open_interpreter/`)
 Implementa las cuatro operaciones centrales de asistencia técnica y automatización en el sistema:
 - **`open_interpreter.run_python`**:
-  - *Qué hace:* Ejecuta un fragmento de código Python en un subproceso aislado, aplicando aislamiento de red mediante Bubblewrap si está instalado en el sistema operativo y cancelando la ejecución si se supera el tiempo límite configurado.
+  - *Qué hace:* Ejecuta un fragmento de código Python en un subproceso aislado, aplicando aislamiento de red obligatorio mediante Bubblewrap (bwrap) bajo política fail-closed (rechaza la ejecución con error explícito si bwrap no está instalado en el sistema operativo) y cancelando la ejecución si se supera el tiempo límite configurado.
   - *Capacidad requerida:* `code_execution`.
   - *Confirmación:* Sí pide confirmación previa del usuario (se solicita la primera vez en la sesión de proceso y se cachea en memoria).
 - **`open_interpreter.write_file`**:
@@ -121,6 +120,8 @@ Este bloque recopila todas las funcionalidades, componentes y subsistemas que fo
   Capacidad diferida del catálogo para registro, emparejamiento, control y monitoreo de dispositivos satélite que se integrará al implementarse el protocolo remoto y registro de nodos en la Fase 7.
 - **Captura y Síntesis de Audio (`audio_capture`, `audio_synthesis`) — Fase de Interfaz de Voz:**
   Capacidades diferidas del catálogo para grabación de micrófono, reconocimiento del habla (STT) y síntesis de voz (TTS) que se incorporarán al construir formalmente los plugins de voz en las interfaces de usuario correspondientes.
+- **Acceso a Red y APIs Externas (`network_access`) — Fase 5:**
+  Capacidad diferida del catálogo para realizar peticiones de red hacia proveedores de modelos de lenguaje (LiteLLM) y servicios web externos, a incorporarse formalmente en la Fase 5 cuando existan plugins que consuman APIs remotas.
 
 ---
 

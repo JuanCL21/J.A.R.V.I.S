@@ -63,7 +63,6 @@ El núcleo valida estrictamente las capacidades declaradas. Cualquier capacidad 
 | `filesystem_read` | `False` | Lectura de archivos dentro del sandbox autorizado. |
 | `filesystem_write` | `True` | Escritura, modificación o borrado de archivos dentro del sandbox. |
 | `code_execution` | `True` | Ejecución de scripts o código arbitrario en entorno aislado. |
-| `network_access` | `False` | Acceso a red, sockets y APIs externas. |
 | `notify_user` | `False` | Envío de notificaciones a la interfaz local del usuario. |
 | `telegram_send` | `False` | Envío de alertas y mensajes mediante el bot de Telegram. |
 
@@ -214,3 +213,6 @@ class Plugin:
    - Si su plugin escribe archivos JSON en el sandbox, debe pasar explícitamente `allowed_extensions=[".json"]`.
 5. **No asumir aislamiento de sesión por acción:**
    - Confirmar una acción con capacidad de riesgo (ej. `run_python`) habilita dicha capacidad (`code_execution`) para el resto de la sesión de proceso.
+6. **Requisito de sistema operativo para `code_execution` (`bwrap` obligatorio, fail-closed):**
+   - Para ejecutar código Python con aislamiento de red en Linux, el binario del sistema `bwrap` (paquete `bubblewrap`) es un requisito de sistema obligatorio.
+   - Si `bwrap` no está instalado en el sistema operativo, `run_python` opera bajo política **fail-closed**: rechaza inmediatamente la ejecución lanzando un `RuntimeError` y registrando un error en la auditoría, impidiendo cualquier ejecución degradada sin aislamiento.

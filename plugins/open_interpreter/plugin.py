@@ -31,7 +31,13 @@ def run_python(
     workspace_root = resolve_sandbox_root().resolve()
     bwrap_path = shutil.which("bwrap")
 
-    if bwrap_path and network_isolated:
+    if network_isolated:
+        if not bwrap_path:
+            raise RuntimeError(
+                "Aislamiento de red no disponible: 'bwrap' (Bubblewrap) no está instalado en el sistema. "
+                "Ejecución de código rechazada por política de seguridad fail-closed."
+            )
+
         venv_root = Path(sys.executable).parent.parent
         base_prefix = Path(sys.base_prefix)
 

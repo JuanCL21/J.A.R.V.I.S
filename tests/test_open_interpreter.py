@@ -302,3 +302,35 @@ def test_oi_07_run_python_infinite_loop_timeout(isolated_env):
     assert run_res["ok"] is False
     assert run_res["reason"] == "timeout"
     assert "timeout de 1.0s" in run_res["error"]
+
+
+# ============================================================================
+# OI-08: run_python sin bwrap en el sistema → rechazo fail-closed
+# ============================================================================
+def test_oi_08_run_python_fail_closed_without_bwrap(isolated_env, monkeypatch):
+    """
+    OI-08: Política fail-closed: Si bwrap no está instalado en el sistema operativo
+    (shutil.which('bwrap') devuelve None), run_python RECHAZA la ejecución de código
+    con un error explícito en lugar de degradar silenciosamente a un subprocess sin aislamiento.
+    """
+    from plugins.open_interpreter.plugin import run_python
+
+    # 1. Simular ausencia de bwrap en el sistema operativo
+    monkeypatch.setattr("shutil.which", lambda cmd: None)
+
+    # Invocación directa debe lanzar RuntimeError fail-closed
+    with pytest.raises(RuntimeError, match="fail-closed"):
+        run_python("print('esto no debe ejecutarse')")
+
+    # Invocación a través del Dispatcher debe devolver ok=False con execution_error
+    dispatcher: Dispatcher = isolated_env["dispatcher"]
+    res = dispatcher.invoke(
+        "open_interpreter.run_python",
+        params={"code": "print('esto no debe ejecutarse')"},
+        user_confirmed=True,
+    )
+    assert res["ok"] is False
+    assert res["reason"] == "execution_error"
+    assert "Aislamiento de red no disponible" in res["error"]
+    assert "fail-closed" in res["error"]
+
