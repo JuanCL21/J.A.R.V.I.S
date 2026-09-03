@@ -9,7 +9,13 @@ Cubre:
    Cualquier intento de pasar source_url, commit_hash o **kwargs falla de inmediato.
 4. TEST REQUERIDO 4: Los plugins instalados por modo Avanzado quedan siempre con status='no_verificado',
    sin metadatos de auditoría (None), sin importar los parámetros pasados.
-5. Carga y validación del archivo curated_catalog.json.
+5. Carga y validación del archivo curated_catalog.json (incluyendo flag is_placeholder_data: true).
+6. TEST ADVERSARIAL 1: test_resolve_git_ref_adversarial_rejects_source_url_starting_with_dash
+   (rechazo fail-closed sin disparar subprocess).
+7. TEST ADVERSARIAL 2: test_resolve_git_ref_adversarial_rejects_ref_starting_with_dash
+   (rechazo fail-closed sin disparar subprocess).
+8. TEST ADVERSARIAL 3: test_install_from_url_adversarial_propagates_rejection
+   (sin efectos secundarios en base de datos tras rechazo).
 """
 
 import inspect
@@ -40,6 +46,7 @@ def test_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     catalog_data = {
         "schema_version": "1",
         "catalog_updated_at": "2026-08-30T00:00:00Z",
+        "is_placeholder_data": True,
         "plugins": [
             {
                 "plugin_id": "toy",
@@ -264,7 +271,15 @@ def test_install_from_url_always_leaves_status_no_verificado(test_env, local_git
 # TEST 5: Carga y validación del archivo de catálogo real (curated_catalog.json)
 # ============================================================================
 def test_curated_catalog_json_file_valid_schema():
-    """Verifica que el archivo real database/curated_catalog.json contenga las entradas requeridas."""
+    """Verifica que el archivo real database/curated_catalog.json contenga las entradas requeridas y el flag placeholder."""
+    catalog_path = resolve_catalog_path()
+    with open(catalog_path, "r", encoding="utf-8") as f:
+        raw_data = json.load(f)
+
+    assert raw_data.get("is_placeholder_data") is True, (
+        "database/curated_catalog.json debe contener 'is_placeholder_data': true"
+    )
+
     catalog = load_curated_catalog()
     assert "toy" in catalog
     assert "open_interpreter" in catalog
@@ -277,3 +292,109 @@ def test_curated_catalog_json_file_valid_schema():
         assert entry["name"]
         assert entry["reviewed_by"]
         assert entry["reviewed_at"]
+
+
+# ============================================================================
+# TESTS ADVERSARIALES: Protección contra inyección de argumentos hacia git
+# ============================================================================
+
+def test_resolve_git_ref_adversarial_rejects_source_url_starting_with_dash(monkeypatch: pytest.MonkeyPatch):
+    """
+    TEST ADVERSARIAL 1:
+    Llamar a resolve_git_ref con un source_url que empiece con '-' y verificar que levanta
+    ValueError ANTES de ejecutar ningún subprocess.run (garantizado con mock que explota si se llama).
+    """
+    def mock_subprocess_run(*args, **kwargs):
+        raise AssertionError(
+            "VULNERABILIDAD DETECTADA: subprocess.run fue invocado con source_url que inicia con '-'!"
+        )
+
+    monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+    # Intentos de inyección de argumentos como switches de git (ej. --upload-pack, -c, etc.)
+    malicious_urls = [
+        "--upload-pack=touch /tmp/pwned",
+        "-c core.gitproxy=evil",
+        "--version",
+        "-v",
+        "  -leading-spaces-with-dash",
+    ]
+
+    for bad_url in malicious_urls:
+        with pytest.raises(ValueError, match="source_url inválido"):
+            resolve_git_ref(source_url=bad_url, ref="HEAD")
+
+
+def test_resolve_git_ref_adversarial_rejects_ref_starting_with_dash(monkeypatch: pytest.MonkeyPatch):
+    """
+    TEST ADVERSARIAL 2:
+    Llamar a resolve_git_ref con un ref que empiece con '-' y verificar que levanta
+    ValueError ANTES de ejecutar ningún subprocess.run.
+    """
+    def mock_subprocess_run(*args, **kwargs):
+        raise AssertionError(
+            "VULNERABILIDAD DETECTADA: subprocess.run fue invocado con ref que inicia con '-'!"
+        )
+
+    monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+    malicious_refs = [
+        "--output=/tmp/pwned",
+        "-o",
+        "--end-of-options",
+        "--tags",
+        "  -leading-dash-ref",
+    ]
+
+    for bad_ref in malicious_refs:
+        with pytest.raises(ValueError, match="ref inválido"):
+            resolve_git_ref(source_url="https://github.com/org/repo.git", ref=bad_ref)
+
+
+def test_install_from_url_adversarial_propagates_rejection(test_env):
+    """
+    TEST ADVERSARIAL 3:
+    Confirmar que install_from_url() no registra nada en plugin_registry si resolve_git_ref
+    levantó ValueError (rechazo total, cero side effects en la base de datos).
+    También valida que plugin_id comenzando con '-' sea rechazado fail-closed.
+    """
+    installer: PluginInstaller = test_env["installer"]
+    registry: PluginRegistry = test_env["registry"]
+
+    # 1. Intento con ref malicioso
+    with pytest.raises(ValueError, match="ref inválido"):
+        installer.install_from_url(
+            source_url="https://github.com/org/valid_repo.git",
+            plugin_id="plugin_reject_ref",
+            ref="--config=pwned",
+        )
+    assert registry.get_plugin("plugin_reject_ref") is None, (
+        "No debe existir ningún registro en plugin_registry si ref fue rechazado"
+    )
+
+    # 2. Intento con source_url malicioso
+    with pytest.raises(ValueError, match="source_url inválido"):
+        installer.install_from_url(
+            source_url="--upload-pack=pwned",
+            plugin_id="plugin_reject_url",
+            ref="HEAD",
+        )
+    assert registry.get_plugin("plugin_reject_url") is None, (
+        "No debe existir ningún registro en plugin_registry si source_url fue rechazado"
+    )
+
+    # 3. Intento con plugin_id malicioso (empezando con '-')
+    with pytest.raises(ValueError, match="plugin_id inválido"):
+        installer.install_from_url(
+            source_url="https://github.com/org/valid_repo.git",
+            plugin_id="-flag_as_plugin_id",
+            ref="HEAD",
+        )
+    assert registry.get_plugin("-flag_as_plugin_id") is None, (
+        "No debe existir ningún registro en plugin_registry si plugin_id fue rechazado"
+    )
+
+    # 4. Intento con plugin_id malicioso en install_from_catalog
+    with pytest.raises(ValueError, match="plugin_id inválido"):
+        installer.install_from_catalog("-malicious_catalog_id")
+    assert registry.get_plugin("-malicious_catalog_id") is None

@@ -10,6 +10,17 @@ Implementa dos flujos de instalación con aislamiento estricto y auditoría:
    Resuelve el hash de commit concreto (40 hex) de la referencia dada (HEAD, rama, tag),
    registrándolo en status='no_verificado' sin excepción.
 3. B.3 - Integración con sandbox y dispatcher común.
+
+SEGURIDAD Y SANITIZACIÓN:
+- Rechazo explícito (fail-closed) de source_url, ref y plugin_id que comiencen con '-' para prevenir
+  inyección de argumentos hacia binarios de git o almacenamiento.
+- Uso del separador '--' en git ls-remote y '--end-of-options' en git rev-parse como defensa en profundidad.
+
+CATÁLOGO CURADO DE DESARROLLO:
+- El archivo database/curated_catalog.json contiene el flag 'is_placeholder_data: true'.
+  Sus entradas (toy, open_interpreter, system_monitor) utilizan commit hashes sintéticos y URLs
+  de prueba; son únicamente de ejemplo de desarrollo y DEBEN ser reemplazadas por revisiones reales
+  de auditoría humana antes de cualquier despliegue en producción.
 """
 
 import json
@@ -50,6 +61,8 @@ def resolve_catalog_path(catalog_path: Optional[Union[str, Path]] = None) -> Pat
 def load_curated_catalog(catalog_path: Optional[Union[str, Path]] = None) -> Dict[str, Dict[str, Any]]:
     """
     Carga el catálogo curado desde el archivo JSON y lo devuelve indexado por plugin_id.
+    Nota: Verifica y parsea el archivo database/curated_catalog.json (el cual incluye
+    el flag 'is_placeholder_data: true' para indicar entradas sintéticas de desarrollo).
     """
     target_path = resolve_catalog_path(catalog_path)
     if not target_path.is_file():
@@ -91,18 +104,34 @@ def resolve_git_ref(source_url: str, ref: str = "HEAD") -> str:
     Resuelve el hash de commit concreto (40 caracteres hexadecimales) para una ref dada
     (HEAD, rama, tag o hash directo) en el repositorio remoto o local especificado por source_url.
     NUNCA devuelve ni persiste la referencia mutable.
+
+    REGLAS DE SEGURIDAD (ANTI-INYECCIÓN DE ARGUMENTOS):
+    1. Rechazo explícito (fail-closed) ANTES de invocar procesos si source_url o ref empiezan con '-'.
+    2. Defensa en profundidad mediante '--' en git ls-remote y '--end-of-options' en git rev-parse.
     """
-    clean_ref = ref.strip()
+    # 1. Validación estricta y fail-closed de source_url
+    if not source_url or not isinstance(source_url, str) or source_url.strip().startswith("-"):
+        raise ValueError(
+            f"source_url inválido: no puede estar vacío ni comenzar con '-' ('{source_url}')."
+        )
+
+    # 2. Validación estricta y fail-closed de ref
+    clean_ref = ref.strip() if isinstance(ref, str) else ""
+    if not clean_ref or clean_ref.startswith("-"):
+        raise ValueError(
+            f"ref inválido: no puede estar vacío ni comenzar con '-' ('{ref}')."
+        )
+
     # Si ya es un hash SHA-1 de 40 caracteres hexadecimales, es directamente el commit
     if re.match(r"^[0-9a-fA-F]{40}$", clean_ref):
         return clean_ref.lower()
 
     # Si es un directorio local con repositorio git, resolver con git rev-parse localmente
+    # usando --verify y --end-of-options como terminador de opciones estándar de git
     local_path = Path(source_url)
     if local_path.is_dir() and ((local_path / ".git").exists() or (local_path / "HEAD").exists()):
-        # Intentar desreferenciar explícitamente a commit (para tags anotados o referencias indirectas)
         for target in [f"{clean_ref}^{{commit}}", clean_ref]:
-            cmd = ["git", "-C", str(local_path), "rev-parse", target]
+            cmd = ["git", "-C", str(local_path), "rev-parse", "--verify", "--end-of-options", target]
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -116,7 +145,8 @@ def resolve_git_ref(source_url: str, ref: str = "HEAD") -> str:
                     return commit_out
 
     # Resolver mediante git ls-remote sin necesidad de clonar todo el árbol
-    cmd = ["git", "ls-remote", source_url, clean_ref]
+    # Separador '--' incluido obligatoriamente antes de source_url (defensa en profundidad)
+    cmd = ["git", "ls-remote", "--", source_url, clean_ref]
     try:
         proc = subprocess.run(
             cmd,
@@ -132,10 +162,11 @@ def resolve_git_ref(source_url: str, ref: str = "HEAD") -> str:
 
     output = proc.stdout.strip() if proc.returncode == 0 else ""
     if not output:
-        # Intentar buscar en refs/heads/ y refs/tags/ explícitamente
+        # Intentar buscar en refs/heads/ y refs/tags/ explícitamente con '--'
         cmd_fallback = [
             "git",
             "ls-remote",
+            "--",
             source_url,
             f"refs/heads/{clean_ref}",
             f"refs/tags/{clean_ref}",
@@ -204,6 +235,13 @@ class PluginInstaller:
         2. Registra en plugin_registry (lo deja en status='no_verificado').
         3. Promueve inmediatamente a 'curado' con el reviewed_by y reviewed_at ORIGINALES del catálogo.
         """
+        # NOTA DE AUDITORÍA: plugin_id no es validado contra prefijos '-' en plugin_registry.py (solo se inserta
+        # parametrizado en SQLite), por lo que se valida explícitamente aquí en la capa de instalación (fail-closed).
+        if not plugin_id or not isinstance(plugin_id, str) or plugin_id.strip().startswith("-"):
+            raise ValueError(
+                f"plugin_id inválido: no puede estar vacío ni comenzar con '-' ('{plugin_id}')."
+            )
+
         catalog = load_curated_catalog(self.catalog_path)
         if plugin_id not in catalog:
             raise KeyError(
@@ -252,6 +290,15 @@ class PluginInstaller:
         NUNCA persiste una referencia mutable.
         """
         # TODO (PENDIENTE 1): Control de acceso por rol/cuenta para modo Avanzado.
+
+        # NOTA DE AUDITORÍA: plugin_id no es validado contra prefijos '-' en plugin_registry.py (solo se inserta
+        # parametrizado en SQLite), por lo que se valida explícitamente aquí en la capa de instalación (fail-closed).
+        if not plugin_id or not isinstance(plugin_id, str) or plugin_id.strip().startswith("-"):
+            raise ValueError(
+                f"plugin_id inválido: no puede estar vacío ni comenzar con '-' ('{plugin_id}')."
+            )
+
+        # resolve_git_ref valida fail-closed source_url y ref antes de cualquier subproceso
         commit_hash = resolve_git_ref(source_url=source_url, ref=ref)
 
         self.registry.register_plugin(
