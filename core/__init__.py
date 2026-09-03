@@ -30,7 +30,10 @@ from .secrets import load_secrets, get_secret, set_secret
 from .logging_setup import setup_logging, get_logger
 from .plugin_loader import PluginLoader, PluginManifest, ActionDefinition
 from .dispatcher import Dispatcher
-from .plugin_registry import PluginRegistry, default_plugin_registry
+from .plugin_registry import PluginRegistry, resolve_db_path
+
+# TODO: default_plugin_registry a nivel de módulo eliminado para evitar efectos secundarios en imports.
+# Instanciar PluginRegistry explícitamente donde se requiera.
 
 __all__ = [
     "CAPABILITY_CATALOG",
@@ -44,7 +47,7 @@ __all__ = [
     "AuditLogger",
     "default_audit_logger",
     "PluginRegistry",
-    "default_plugin_registry",
+    "resolve_db_path",
     "_SENSITIVE_SUBDIRS",
     "resolve_sandbox_root",
     "is_safe_path",

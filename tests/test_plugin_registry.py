@@ -1,18 +1,22 @@
 """
-Pruebas de la Subfase A: Modelo de datos plugin_registry.
+Pruebas de la Subfase A: Modelo de datos plugin_registry y correcciones de seguridad.
 Cubre:
 1. Creación y estructura de la tabla plugin_registry en SQLite.
 2. Separación estricta entre active_commit_hash y candidate_commit_hash.
 3. Test requerido: crear plugin con commit A curado, simular detección de commit B,
    verificar que active_commit_hash sigue en A y B queda solo en candidate_commit_hash.
 4. Unidad de confianza como par (plugin_id, commit_hash) — un commit nuevo no hereda status curado.
+5. FIX PROBLEMA 1: register_plugin inserta SIEMPRE no_verificado, sin posibilidad de bypass.
+6. FIX PROBLEMA 2: Resolución canónica de la ruta de DB independiente de os.getcwd() y sin
+   creación espuria de archivos en instanciación.
 """
 
+import os
 from pathlib import Path
 import sqlite3
 import pytest
 
-from core.plugin_registry import PluginRegistry
+from core.plugin_registry import PluginRegistry, _REPO_ROOT, _DEFAULT_DB_PATH
 
 
 @pytest.fixture
@@ -26,7 +30,6 @@ def test_subfase_a_plugin_registry_table_structure(registry: PluginRegistry):
     """Verifica que la tabla plugin_registry contenga las columnas y restricciones requeridas."""
     conn = registry._get_connection()
     try:
-        # Obtener información de columnas
         cursor = conn.execute("PRAGMA table_info(plugin_registry)")
         columns = {row["name"]: row["type"] for row in cursor.fetchall()}
 
@@ -69,16 +72,19 @@ def test_subfase_a_required_detection_separation_active_vs_candidate(registry: P
     commit_b = "b9c8d7e6f5a43210987654321fedcba98765432"
     source_url = "https://github.com/org/sample_plugin.git"
 
-    # 1. Crear plugin con commit A curado
+    # 1. Registrar plugin (se crea siempre como no_verificado) y luego promoverlo explícitamente a curado
     registry.register_plugin(
         plugin_id=plugin_id,
         active_commit_hash=commit_a,
         source_url=source_url,
-        status="curado",
+    )
+    promoted = registry.promote_to_curated(
+        plugin_id=plugin_id,
         reviewed_by="auditor_principal",
         reviewed_at="2026-09-02T22:00:00Z",
         promoted_at="2026-09-02T22:05:00Z",
     )
+    assert promoted is True
 
     initial_state = registry.get_plugin(plugin_id)
     assert initial_state is not None
@@ -118,7 +124,9 @@ def test_subfase_a_trust_unit_is_pair_plugin_id_and_commit_hash(registry: Plugin
         plugin_id=plugin_id,
         active_commit_hash=commit_a,
         source_url="https://github.com/org/trusted.git",
-        status="curado",
+    )
+    registry.promote_to_curated(
+        plugin_id=plugin_id,
         reviewed_by="auditor_seguridad",
     )
 
@@ -142,3 +150,129 @@ def test_subfase_a_trust_unit_is_pair_plugin_id_and_commit_hash(registry: Plugin
     )
     assert after_update["reviewed_by"] is None
     assert registry.is_curated(plugin_id, commit_hash=commit_b) is False
+
+
+def test_register_plugin_strictly_enforces_no_verificado_and_no_metadata_bypass(registry: PluginRegistry):
+    """
+    TEST REQUERIDO (PROBLEMA 1):
+    Verifica que register_plugin no admita parámetros para alterar el status ni auditoría.
+    Cualquier inserción o actualización vía register_plugin DEBE resultar estrictamente
+    en status='no_verificado' y reviewed_by/reviewed_at/promoted_at en None.
+    """
+    plugin_id = "bypass_attempt_plugin"
+    commit_1 = "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"
+    source_url = "https://github.com/org/bypass.git"
+
+    # 1. Intentar pasar parámetros prohibidos (status, reviewed_by, etc.) debe fallar a nivel de signatura
+    with pytest.raises(TypeError):
+        registry.register_plugin(  # type: ignore
+            plugin_id=plugin_id,
+            active_commit_hash=commit_1,
+            source_url=source_url,
+            status="curado",
+        )
+
+    with pytest.raises(TypeError):
+        registry.register_plugin(  # type: ignore
+            plugin_id=plugin_id,
+            active_commit_hash=commit_1,
+            source_url=source_url,
+            reviewed_by="admin_malicioso",
+        )
+
+    # 2. Invocación normal legítima
+    registry.register_plugin(
+        plugin_id=plugin_id,
+        active_commit_hash=commit_1,
+        source_url=source_url,
+    )
+
+    entry = registry.get_plugin(plugin_id)
+    assert entry is not None
+    assert entry["status"] == "no_verificado", "El status debe ser forzosamente no_verificado"
+    assert entry["reviewed_by"] is None, "reviewed_by debe ser forzosamente None"
+    assert entry["reviewed_at"] is None, "reviewed_at debe ser forzosamente None"
+    assert entry["promoted_at"] is None, "promoted_at debe ser forzosamente None"
+    assert registry.is_curated(plugin_id) is False
+
+    # 3. Promoverlo a curado mediante la ÚNICA vía autorizada
+    registry.promote_to_curated(plugin_id, reviewed_by="auditor_oficial")
+    assert registry.is_curated(plugin_id) is True
+
+    # 4. Volver a registrar el plugin (ej. actualización de commit directo):
+    # Debe RESETEAR forzosamente el status a no_verificado y limpiar metadatos de auditoría
+    commit_2 = "bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222"
+    registry.register_plugin(
+        plugin_id=plugin_id,
+        active_commit_hash=commit_2,
+        source_url=source_url,
+    )
+
+    re_registered = registry.get_plugin(plugin_id)
+    assert re_registered is not None
+    assert re_registered["active_commit_hash"] == commit_2
+    assert re_registered["status"] == "no_verificado", (
+        "Llamar a register_plugin jamás debe preservar status curado"
+    )
+    assert re_registered["reviewed_by"] is None
+    assert re_registered["reviewed_at"] is None
+    assert re_registered["promoted_at"] is None
+    assert registry.is_curated(plugin_id) is False
+
+
+def test_plugin_registry_db_path_independent_of_process_cwd_and_no_spurious_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """
+    TEST REQUERIDO (PROBLEMA 2):
+    1. Instanciar sin db_path desde dos cwd diferentes resuelve exactamente la misma ruta canónica (_REPO_ROOT).
+    2. Instanciar la clase (sin invocar operaciones que abran conexión) NO crea archivos de base de datos
+       ni directorios espurios en el cwd actual.
+    """
+    dir_1 = tmp_path / "cwd_workdir_1"
+    dir_2 = tmp_path / "cwd_workdir_2"
+    dir_1.mkdir()
+    dir_2.mkdir()
+
+    # Asegurar que no haya anulación por variable de entorno
+    monkeypatch.delenv("JARVIS_DB_PATH", raising=False)
+
+    # --- CWD 1 ---
+    monkeypatch.chdir(dir_1)
+    reg_1 = PluginRegistry()
+
+    # La ruta resuelta debe ser la canónica del repositorio (_REPO_ROOT / database / jarvis.db)
+    assert reg_1.db_path == _DEFAULT_DB_PATH.resolve()
+    assert reg_1.db_path != (dir_1 / "database" / "jarvis.db").resolve()
+
+    # Verificar que NO se crearon archivos en dir_1 por solo instanciar
+    assert not (dir_1 / "database").exists(), "No debe crearse carpeta database en el cwd"
+    assert not (dir_1 / "jarvis.db").exists(), "No debe crearse jarvis.db en el cwd"
+    assert list(dir_1.iterdir()) == [], "El cwd actual debe permanecer completamente limpio"
+
+    # --- CWD 2 ---
+    monkeypatch.chdir(dir_2)
+    reg_2 = PluginRegistry()
+
+    # La ruta resuelta en cwd 2 debe ser EXACTAMENTE idéntica a la de cwd 1
+    assert reg_2.db_path == reg_1.db_path
+    assert reg_2.db_path == _DEFAULT_DB_PATH.resolve()
+    assert reg_2.db_path != (dir_2 / "database" / "jarvis.db").resolve()
+
+    # Verificar que NO se crearon archivos en dir_2
+    assert list(dir_2.iterdir()) == [], "El cwd actual 2 debe permanecer completamente limpio"
+
+    # --- Variable de entorno JARVIS_DB_PATH (anulación explícita) ---
+    custom_db_dir = tmp_path / "env_custom_location"
+    custom_db_file = custom_db_dir / "custom_jarvis.db"
+    monkeypatch.setenv("JARVIS_DB_PATH", str(custom_db_file))
+
+    reg_env = PluginRegistry()
+    assert reg_env.db_path == custom_db_file.resolve()
+
+    # La instanciación NO debe haber creado aún el archivo
+    assert not custom_db_file.exists(), "La instanciación no debe crear el archivo de base de datos"
+
+    # Al invocar una operación que requiere conexión, se inicializa perezosamente (lazy)
+    assert reg_env.list_plugins() == []
+    assert custom_db_file.exists(), "El archivo de DB debe crearse solo cuando se requiere conexión"

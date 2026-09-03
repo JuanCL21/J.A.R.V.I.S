@@ -4,14 +4,22 @@ Subfase A:
 - Tabla plugin_registry con control de active_commit_hash y candidate_commit_hash.
 - La unidad de confianza es el PAR (plugin_id, commit_hash) — nunca solo plugin_id.
 - Separación estricta entre active_commit_hash (en ejecución) y candidate_commit_hash (detectado).
+- register_plugin inserta SIEMPRE en status='no_verificado'. El ÚNICO camino a 'curado' es promote_to_curated().
+- Resolución canónica de la ruta de la base de datos contra _REPO_ROOT, NUNCA contra os.getcwd().
+- Sin efectos secundarios en import (inicialización perezosa de la base de datos).
 """
 
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 import sqlite3
 from typing import Any, Dict, List, Optional
 
 VALID_STATUSES = ("no_verificado", "curado")
+
+# Raíz canónica del repositorio calculada a partir de __file__, NUNCA de os.getcwd()
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_DB_PATH = _REPO_ROOT / "database" / "jarvis.db"
 
 # TODO (PENDIENTE 1): Control de acceso real (rol/cuenta) para "aplicar actualización" y "promover".
 # Se define junto con el auth general del dashboard en Fase 5, no antes.
@@ -21,19 +29,38 @@ VALID_STATUSES = ("no_verificado", "curado")
 # TODO (PENDIENTE 3): Qué gatilla que una cuenta vea el modo Avanzado, más allá de "oculto por defecto".
 
 
-class PluginRegistry:
-    def __init__(self, db_path: str | Path = "database/jarvis.db"):
-        self.db_path = Path(db_path)
-        self._ensure_db()
+def resolve_db_path(db_path: Optional[str | Path] = None) -> Path:
+    """
+    Resuelve la ruta canónica del archivo de base de datos según la prioridad:
+    1. Anulación programática explícita (parámetro db_path).
+    2. Variable de entorno JARVIS_DB_PATH si está definida.
+    3. Raíz fija del repositorio (_REPO_ROOT calculada desde __file__).
+    NUNCA depende de os.getcwd().
+    """
+    if db_path is not None:
+        return Path(db_path).resolve()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), timeout=10.0)
-        conn.row_factory = sqlite3.Row
-        return conn
+    env_path = os.environ.get("JARVIS_DB_PATH")
+    if env_path:
+        return Path(env_path).resolve()
+
+    return _DEFAULT_DB_PATH.resolve()
+
+
+class PluginRegistry:
+    def __init__(self, db_path: Optional[str | Path] = None):
+        """
+        Inicializa el registro de plugins.
+        La ruta de la base de datos se resuelve de forma determinista contra _REPO_ROOT.
+        No ejecuta DDL ni crea archivos en disco durante la instanciación (lazy initialization).
+        """
+        self.db_path = resolve_db_path(db_path)
+        self._db_initialized: bool = False
 
     def _ensure_db(self) -> None:
+        """Crea la tabla plugin_registry en la base de datos SQLite si aún no existe."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = self._get_connection()
+        conn = sqlite3.connect(str(self.db_path), timeout=10.0)
         try:
             with conn:
                 conn.execute(
@@ -50,29 +77,30 @@ class PluginRegistry:
                     )
                     """
                 )
+            self._db_initialized = True
         finally:
             conn.close()
+
+    def _get_connection(self) -> sqlite3.Connection:
+        """Obtiene una conexión a la base de datos garantizando que el esquema existe."""
+        if not self._db_initialized:
+            self._ensure_db()
+        conn = sqlite3.connect(str(self.db_path), timeout=10.0)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     def register_plugin(
         self,
         plugin_id: str,
         active_commit_hash: str,
         source_url: str,
-        status: str = "no_verificado",
-        candidate_commit_hash: Optional[str] = None,
-        reviewed_by: Optional[str] = None,
-        reviewed_at: Optional[str] = None,
-        promoted_at: Optional[str] = None,
     ) -> None:
         """
-        Registra o actualiza un plugin en el registro.
-        La unidad de confianza es (plugin_id, commit_hash).
+        Registra un plugin en el registro.
+        REGLA DE SEGURIDAD ESTRICTA: Todo plugin se registra obligatoriamente con status='no_verificado'
+        y sin metadatos de auditoría (NULL). No existe ningún parámetro ni flag para alterar este estado.
+        La promoción a 'curado' solo puede ocurrir a través de promote_to_curated().
         """
-        if status not in VALID_STATUSES:
-            raise ValueError(
-                f"Estado inválido '{status}'. Valores permitidos: {VALID_STATUSES}"
-            )
-
         conn = self._get_connection()
         try:
             with conn:
@@ -81,25 +109,20 @@ class PluginRegistry:
                     INSERT INTO plugin_registry (
                         plugin_id, active_commit_hash, candidate_commit_hash,
                         status, source_url, reviewed_by, reviewed_at, promoted_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, NULL, 'no_verificado', ?, NULL, NULL, NULL)
                     ON CONFLICT(plugin_id) DO UPDATE SET
                         active_commit_hash = excluded.active_commit_hash,
-                        candidate_commit_hash = excluded.candidate_commit_hash,
-                        status = excluded.status,
+                        candidate_commit_hash = NULL,
+                        status = 'no_verificado',
                         source_url = excluded.source_url,
-                        reviewed_by = excluded.reviewed_by,
-                        reviewed_at = excluded.reviewed_at,
-                        promoted_at = excluded.promoted_at
+                        reviewed_by = NULL,
+                        reviewed_at = NULL,
+                        promoted_at = NULL
                     """,
                     (
                         plugin_id,
                         active_commit_hash,
-                        candidate_commit_hash,
-                        status,
                         source_url,
-                        reviewed_by,
-                        reviewed_at,
-                        promoted_at,
                     ),
                 )
         finally:
@@ -184,7 +207,8 @@ class PluginRegistry:
     ) -> bool:
         """
         Promueve el active_commit_hash actual del plugin a status 'curado' tras revisión humana.
-        REGLA CRÍTICA: No puede existir ningún camino automático para cambiar a curado.
+        REGLA CRÍTICA: Único método del sistema autorizado para establecer status='curado' y
+        asignar reviewed_by, reviewed_at y promoted_at. No existe ninguna ruta automática alternativa.
         """
         # TODO (PENDIENTE 1): Control de acceso real (rol/cuenta) para "promover".
         now_ts = datetime.now(timezone.utc).isoformat()
@@ -227,4 +251,5 @@ class PluginRegistry:
         return True
 
 
-default_plugin_registry = PluginRegistry()
+# TODO: default_plugin_registry a nivel de módulo eliminado para evitar efectos secundarios en imports.
+# Instanciar PluginRegistry(db_path=...) explícitamente donde se requiera.
