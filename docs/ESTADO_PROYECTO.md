@@ -15,8 +15,6 @@ Cada afirmación de este documento está verificada contra el estado **real y ac
 
 La siguiente tabla refleja exclusivamente el trabajo consolidado, commiteado y verificado en la suite automatizada de pruebas:
 
-| Fase / Componente | Nombre y Alcance | Qué se construyó en la práctica | Commit(s) | Tests pytest (resultado real) |
-|---|---|---|---|---|
 | Fase / Componente | Nombre y Alcance | Qué se construyó en la práctica | Commit(s) | Tests pytest (resultado real) | Estado de Aprobación |
 |---|---|---|---|---|---|
 | **Fase 0** | Fundación del Repositorio | Árbol de carpetas canónico (`core/`, `plugins/`, `versions/`, `database/`, `tests/`, `docs/`), virtualenv Python 3.13, `.gitignore` estricto excluyendo `.env`, `*.db`, logs y temporales desde el inicio. | `8937294` | N/A (Estructural) | **Aprobada** |
@@ -24,11 +22,17 @@ La siguiente tabla refleja exclusivamente el trabajo consolidado, commiteado y v
 | **Fase 2** | Plugin de Prueba (`toy`) | Implementación de `plugins/toy/` (`manifest.json`, `plugin.py`) con la acción `toy.get_time` (capacidad `system_info`) para validar ciclo de vida, recarga limpia y aislamiento del núcleo sin riesgos. | `218b3d3` | **4 pasados**<br>(`test_toy_plugin.py`: TOY-01 a TOY-03 + basic_execution) | **Aprobada** |
 | **Fase 3** | Perfil `core-lite` | Primera versión ejecutable (`versions/core_lite/main.py`), restringida a cero servidores de red/GUI escuchando, sin capacidades de filesystem ni ejecución de código, auditando rechazos al intentar cargar manifiestos ajenos. | `9b9efb1`<br>`087a54f` | **3 pasados**<br>(`test_core_lite.py`: LITE-01 a LITE-03) | **Aprobada** |
 | **Fase 4** | Plugin Open Interpreter y Confinamiento Adversarial | Implementación de `plugins/open_interpreter/` con 5 acciones (`run_python`, `write_file`, `read_file`, `create_presentation`, `search_local_files`). Aislamiento de red forzoso en `run_python` con Bubblewrap (`bwrap`) bajo política fail-closed; allowlist estricta de extensiones seguras (`.txt`, `.md`, `.py`, `.pptx`, `.csv`, `.log`, `.png`, `.jpg`, `.jpeg`, `.pdf` — sin `.json`); bloqueo de path traversal y exclusión estricta de subdirectorios de credenciales (`.ssh`, `.aws`, `.gnupg`, etc.); timeout de ejecución. | `d5da517`<br>`18934f9`<br>`97fbf00`<br>`305d273` | **8 pasados**<br>(`test_open_interpreter.py`: OI-01 a OI-08) | **Aprobada** |
-| **Extensión UI** | Visualizador de Audio Reactivo 3D (QPainter 2D) | Widget `ReactiveAudioVisualizer` en PyQt6 (`ui/audio_visualizer.py`) con proyección matemática 3D→2D sobre esfera de Fibonacci (144 nodos, aristas precalculadas, rotación NumPy), renderizado puro en 2D sobre `QPainter` (sin OpenGL ni Qt3D), sprites de glow radial precomputados en memoria, reactividad FFT en escucha y pulso sincrónico en habla (>190-440 FPS reales medidos). | `2dd64d6`<br>`cf6d661` | **7 pasados**<br>(`test_audio_visualizer.py`) | **Construido, pendiente de revisión** |
 | **Gestión Plugins (Subfase A)** | Modelo de Datos `plugin_registry` | Tabla SQLite `plugin_registry` en `database/jarvis.db` (`core/plugin_registry.py`) con control estricto de `active_commit_hash` y `candidate_commit_hash`. La unidad de confianza es el par `(plugin_id, commit_hash)`. `register_plugin()` fuerza siempre status `no_verificado`. Promoción únicamente mediante `promote_to_curated()`. Resolución canónica de ruta contra `_REPO_ROOT` e inicialización lazy sin efectos secundarios en imports. | `bf705c2`<br>`7d109ca` | **5 pasados**<br>(`test_plugin_registry.py`) | **Construida, pendiente de revisión** |
 | **Gestión Plugins (Subfase B)** | Instalación desde Catálogo y Modo Avanzado | `PluginInstaller` (`core/plugin_installer.py`) y catálogo curado `database/curated_catalog.json` (`is_placeholder_data: true`). Soporte de `install_from_catalog(plugin_id)` (UI final sólo envía ID, preserva auditoría histórica `reviewed_by` y `reviewed_at`) e `install_from_url(source_url, plugin_id, ref)` (resuelve commit concreto 40 hex mediante `git ls-remote` / `rev-parse`, siempre `no_verificado`). Protección fail-closed anti-inyección de argumentos hacia Git (flags con `-`) y separador defensivo `--` / `--end-of-options`. | `17971b0`<br>`c3f1de2` | **8 pasados**<br>(`test_plugin_installer.py`: 5 funcionales + 3 adversariales) | **Construida, pendiente de revisión** |
 
-**Total de tests automatizados pasando en el repositorio:** **43 tests** (`./venv/bin/pytest -v`).
+---
+
+## Fuera de alcance — Parqueado
+
+### Visualizador de Audio Reactivo 3D (`ui/audio_visualizer.py`)
+- **Estado:** Parqueado. No forma parte de la revisión actual ni se considera completado ni aprobado.
+- **Qué se construyó:** Widget `ReactiveAudioVisualizer` en PyQt6 (`ui/audio_visualizer.py`) con proyección matemática 3D→2D sobre esfera de Fibonacci (144 nodos, aristas precalculadas, rotación NumPy), renderizado puro en 2D sobre `QPainter` (sin OpenGL ni Qt3D), sprites de glow radial precomputados en memoria, reactividad FFT en escucha y pulso sincrónico en habla. Cuenta con 7 tests automatizados en `tests/test_audio_visualizer.py`.
+- **Motivo de parqueo:** Su desarrollo se adelantó e intercaló sin pasar por la ronda de revisión y aprobación formal. Queda congelado fuera del alcance de las fases del núcleo hasta que se abra formalmente la etapa de interfaces de usuario (Fase 5+).
 
 ---
 
@@ -37,8 +41,8 @@ La siguiente tabla refleja exclusivamente el trabajo consolidado, commiteado y v
 El proyecto se encuentra ejecutando el **Desglose de Instalación y Ciclo de Vida de Plugins** (capa previa al Dashboard de la Fase 5).
 
 ### Estado por subfases:
-- [ ] **Subfase A — Modelo de datos:** Construida, pendiente de revisión formal (commits `bf705c2`, `7d109ca`).
-- [ ] **Subfase B — Instalación de plugins (Catálogo vs. URL):** Construida con protección anti-inyección, pendiente de revisión formal (commits `17971b0`, `c3f1de2`).
+- [ ] **Subfase A — Modelo de datos:** Construida, pendiente de revisión formal (commits `bf705c2`, `7d109ca`). Pasará a "Aprobada" tras la confirmación de la revisión.
+- [ ] **Subfase B — Instalación de plugins (Catálogo vs. URL):** Construida con protección anti-inyección, pendiente de revisión formal (commits `17971b0`, `c3f1de2`). Pasará a "Aprobada" tras la confirmación de la revisión.
 - [ ] **Subfase C — Caché de confirmación y status `no_verificado` en Dispatcher:** Pendiente de implementación.
 - [ ] **Subfase D — Chequeo de actualizaciones en background y `candidate_commit_hash`:** Pendiente de implementación.
 - [ ] **Subfase E — Modo Avanzado (habilitación controlada):** Pendiente de implementación.
@@ -66,7 +70,6 @@ Estas reglas rigen el diseño arquitectónico del proyecto y son de aplicación 
 9. **Unidad de Confianza `(plugin_id, commit_hash)`:** La confianza y el status `curado` pertenecen al par indivisible `(plugin_id, commit_hash)`. Un nuevo commit para un plugin previamente curado pasa obligatoriamente a status `no_verificado`.
 10. **Promoción Exclusivamente Humana:** No existe ningún mecanismo automático para cambiar un plugin a status `curado`. El único camino autorizado en el código es la invocación directa de `promote_to_curated()`.
 11. **Anti-Inyección de Opciones hacia Procesos Externos:** Toda interacción con binarios de sistema (ej. `git`) rechaza en frontera (*fail-closed*) entradas donde `source_url`, `ref` o `plugin_id` inicien con `-`, e incorpora el separador `--` / `--end-of-options` antes de argumentos posicionales.
-12. **Visualizador de Audio 3D sin OpenGL ni Qt3D:** La interfaz gráfica reactiva no utiliza motores 3D externos ni aceleración OpenGL; realiza proyección matemática 3D→2D (rotación matricial + perspectiva con NumPy) renderizada sobre `QPainter` 2D con sprites de gradiente radial precalculados para garantizar alto rendimiento sostenido.
 
 ### Decisiones Acordadas PENDIENTES de Implementación en Código:
 - **Exclusión de la Caché de Confirmación por Sesión para Plugins `no_verificado`:** *(Decidido, pendiente de implementar en Subfase C)*. `session_confirmed_capabilities` en `Dispatcher` debe ignorar a cualquier plugin cuyo status actual en `plugin_registry` sea `no_verificado`, exigiendo confirmación de usuario en **cada invocación individual**.
@@ -77,13 +80,19 @@ Estas reglas rigen el diseño arquitectónico del proyecto y son de aplicación 
 
 ## 5. Qué Sigue (Próximo Paso Concreto)
 
-El siguiente paso obligatorio del proyecto es la **Subfase C — Caché de confirmación y status `no_verificado`**:
-1. Conectar `core/dispatcher.py` con `core/plugin_registry.py` (o inyectar consulta de registro).
-2. Modificar la lógica de despacho: cuando una acción requiera una capacidad con confirmación previa (`requires_confirmation=True`), si el plugin tiene status `no_verificado`, **no se consulta ni se guarda en la memoria de sesión** (`self.session_confirmed_capabilities`).
-3. Construir la batería de pruebas automatizadas que verifique:
-   - Plugin `curado` pide confirmación la primera vez y cachea para la segunda invocación en el mismo proceso.
-   - Plugin `no_verificado` pide confirmación en la primera, segunda y en cada invocación subsecuente, sin importar si el usuario confirmó la anterior.
-4. Mantener la suite de tests completa en verde y generar el reporte formal para aprobación.
+1. **Cierre de Revisión de Subfases A y B:** Esperar la confirmación y aprobación explícita de la revisión de `core/plugin_registry.py` y `core/plugin_installer.py` para actualizar su estado a **Aprobada**.
+2. **Retomar `docs/formato_plugins.md`:** Actualizar (sin reescribir) la especificación técnica de plugins para incorporar los nuevos campos que el instalador requiere:
+   - Estado de verificación (`curado` / `no_verificado`).
+   - `commit_hash` pineado (fijo de 40 caracteres hexadecimales).
+   - Origen del plugin (catálogo curado vs. modo avanzado por URL).
+   - Especificar cómo interactúan estos campos con el `manifest.json` ya definido en la Fase 4.
+3. **Subfase C:** Implementar la exclusión de la caché de confirmación por sesión para plugins no verificados en `core/dispatcher.py`:
+   - Conectar `core/dispatcher.py` con `core/plugin_registry.py` (o inyectar consulta de registro).
+   - Modificar la lógica de despacho: cuando una acción requiera una capacidad con confirmación previa (`requires_confirmation=True`), si el plugin tiene status `no_verificado`, **no se consulta ni se guarda en la memoria de sesión** (`self.session_confirmed_capabilities`).
+   - Construir la batería de pruebas automatizadas que verifique:
+     - Plugin `curado` pide confirmación la primera vez y cachea para la segunda invocación en el mismo proceso.
+     - Plugin `no_verificado` pide confirmación en la primera, segunda y en cada invocación subsecuente, sin importar si el usuario confirmó la anterior.
+   - Mantener la suite de tests completa en verde y generar el reporte formal para aprobación.
 
 ---
 
