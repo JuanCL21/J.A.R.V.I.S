@@ -41,21 +41,6 @@ CAPABILITY_CATALOG: Dict[str, CapabilityDefinition] = {
         description="Peticiones de red e integración con APIs externas",
         requires_confirmation=False,
     ),
-    "device_management": CapabilityDefinition(
-        name="device_management",
-        description="Gestión, emparejamiento y control de dispositivos vinculados",
-        requires_confirmation=True,
-    ),
-    "audio_synthesis": CapabilityDefinition(
-        name="audio_synthesis",
-        description="Generación de voz y síntesis de audio (TTS)",
-        requires_confirmation=False,
-    ),
-    "audio_capture": CapabilityDefinition(
-        name="audio_capture",
-        description="Captura de micrófono y reconocimiento de voz (STT)",
-        requires_confirmation=False,
-    ),
     "notify_user": CapabilityDefinition(
         name="notify_user",
         description="Envío de notificaciones al usuario local o interfaz activa",

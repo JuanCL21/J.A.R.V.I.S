@@ -64,9 +64,6 @@ El núcleo valida estrictamente las capacidades declaradas. Cualquier capacidad 
 | `filesystem_write` | `True` | Escritura, modificación o borrado de archivos dentro del sandbox. |
 | `code_execution` | `True` | Ejecución de scripts o código arbitrario en entorno aislado. |
 | `network_access` | `False` | Acceso a red, sockets y APIs externas. |
-| `device_management` | `True` | Emparejamiento, configuración y control de dispositivos vinculados. |
-| `audio_synthesis` | `False` | Síntesis de voz (TTS). |
-| `audio_capture` | `False` | Captura de micrófono y reconocimiento de voz (STT). |
 | `notify_user` | `False` | Envío de notificaciones a la interfaz local del usuario. |
 | `telegram_send` | `False` | Envío de alertas y mensajes mediante el bot de Telegram. |
 

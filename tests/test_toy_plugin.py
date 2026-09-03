@@ -81,10 +81,10 @@ def test_toy_02_load_against_profile_without_capability_returns_false():
     en el registro de cargados (loaded_plugins) ni en registered_actions.
     """
     # Registramos un perfil restringido que solo permite 'filesystem_read', NO 'system_info'
-    register_profile("restricted_audio_only", ["audio_synthesis"])
+    register_profile("restricted_filesystem_only", ["filesystem_read"])
 
     loader = PluginLoader()
-    loaded = loader.load(TOY_PLUGIN_DIR, version_profile="restricted_audio_only")
+    loaded = loader.load(TOY_PLUGIN_DIR, version_profile="restricted_filesystem_only")
 
     assert loaded is False
     assert "toy" not in loader.loaded_plugins

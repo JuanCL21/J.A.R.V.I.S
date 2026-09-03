@@ -14,16 +14,13 @@ Este bloque detalla exclusivamente las capacidades, plugins, acciones, perfiles 
 
 ### 1. Capacidades del Catálogo Cerrado (`core/capability_catalog.py`)
 
-El sistema cuenta con un catálogo cerrado de diez capacidades reconocidas. Cualquier acción o plugin que declare una capacidad ajena a este catálogo es rechazado inmediatamente durante la fase de carga con un error explícito. En la práctica, cada una habilita lo siguiente:
+El sistema cuenta con un catálogo cerrado de siete capacidades reconocidas. Cualquier acción o plugin que declare una capacidad ajena a este catálogo es rechazado inmediatamente durante la fase de carga con un error explícito. En la práctica, cada una habilita lo siguiente:
 
 - **`system_info`**: Habilita la lectura de información básica del entorno, reloj del sistema en tiempo universal coordinado (UTC) y métricas elementales de estado operativo (no requiere confirmación previa).
 - **`filesystem_read`**: Habilita la inspección y lectura del contenido de archivos de texto confinados estrictamente dentro de la raíz del sandbox autorizado (no requiere confirmación previa).
 - **`filesystem_write`**: Habilita la creación, modificación y almacenamiento de archivos dentro del sandbox, aplicando validación previa de extensiones permitidas y exclusión estricta de nombres y rutas sensibles (requiere confirmación explícita del usuario).
 - **`code_execution`**: Habilita la ejecución de scripts y fragmentos de código Python en procesos aislados del sistema operativo, con límites de tiempo (timeout) y aislamiento de red mediante contenedores ligeros si la plataforma lo soporta (requiere confirmación explícita del usuario).
 - **`network_access`**: Habilita la realización de peticiones de red e integración con servicios y APIs remotas (no requiere confirmación previa).
-- **`device_management`**: Habilita el registro, vinculación, monitoreo y control de dispositivos y nodos pertenecientes al ecosistema de JARVIS (requiere confirmación explícita del usuario).
-- **`audio_synthesis`**: Habilita la conversión de texto a voz audible mediante motores de síntesis de voz (no requiere confirmación previa).
-- **`audio_capture`**: Habilita la captura de audio a través de micrófonos y el procesamiento de reconocimiento del habla (no requiere confirmación previa).
 - **`notify_user`**: Habilita el despacho de alertas y notificaciones locales directas a la interfaz de usuario activa o al entorno del sistema operativo (no requiere confirmación previa).
 - **`telegram_send`**: Habilita el envío de mensajes, alertas y reportes a través del bot de mensajería de Telegram (no requiere confirmación previa).
 
@@ -120,6 +117,10 @@ Este bloque recopila todas las funcionalidades, componentes y subsistemas que fo
   Adaptación y ampliación de la interfaz gráfica ya existente en el proyecto predecesor para incorporar la visualización de permisos por plugin, diálogos flotantes de autorización y consulta de auditoría, manteniendo el protagonismo de la interacción por voz.
 - **Versión Móvil Ligera (`movil`) — Fase 9:**
   Cliente portátil (cuyo stack tecnológico aún no ha sido definido) enfocado en la consulta ágil del estado del servidor, recepción de alertas urgentes y aprobación de acciones sensibles mediante un solo toque táctil.
+- **Gestión de Dispositivos (`device_management`) — Fase 7:**
+  Capacidad diferida del catálogo para registro, emparejamiento, control y monitoreo de dispositivos satélite que se integrará al implementarse el protocolo remoto y registro de nodos en la Fase 7.
+- **Captura y Síntesis de Audio (`audio_capture`, `audio_synthesis`) — Fase de Interfaz de Voz:**
+  Capacidades diferidas del catálogo para grabación de micrófono, reconocimiento del habla (STT) y síntesis de voz (TTS) que se incorporarán al construir formalmente los plugins de voz en las interfaces de usuario correspondientes.
 
 ---
 
