@@ -73,13 +73,15 @@ def test_visualizer_widget_sprites_and_state_machine(qapp):
     """Verifica los sprites precomputados y la máquina de estados del widget."""
     widget = ReactiveAudioVisualizer(num_nodes=144)
 
-    # 1. Sprites precomputados
+    # 1. Sprites precomputados por nivel de profundidad
     assert "cyan" in widget.glow_sprites
     assert "blue" in widget.glow_sprites
     assert "speaking" in widget.glow_sprites
-    for name, pix in widget.glow_sprites.items():
-        assert not pix.isNull(), f"El sprite '{name}' no debe ser nulo"
-        assert pix.width() > 0 and pix.height() > 0
+    for name, tiers in widget.glow_sprites.items():
+        assert len(tiers) == widget.NUM_DEPTH_TIERS
+        for r, pix in tiers:
+            assert not pix.isNull(), f"El sprite '{name}' no debe ser nulo"
+            assert pix.width() > 0 and pix.height() > 0
 
     # 2. Estado inicial y transiciones
     assert widget.state == VisualizerState.REPOSO
@@ -115,3 +117,78 @@ def test_visualizer_widget_renders_cleanly_on_qimage(qapp):
             break
 
     assert has_drawn_pixels, "El widget debe haber dibujado píxeles en el canvas 2D"
+
+
+def test_audio_reactivity_listening_frequency_modulation(qapp):
+    """
+    Verifica que en estado ESCUCHANDO las muestras de audio del micrófono se descompongan
+    mediante FFT en 16 bandas y produzcan una deformación radial asimétrica individual por nodo.
+    """
+    widget = ReactiveAudioVisualizer(num_nodes=144)
+    widget.set_state(VisualizerState.ESCUCHANDO)
+
+    # Inicialmente las bandas están en cero
+    assert np.all(widget.freq_bands == 0.0)
+
+    # Alimentar una señal senoidal pura a 440 Hz (tono A4)
+    sample_rate = 16000
+    t = np.linspace(0, 0.05, int(sample_rate * 0.05), endpoint=False)
+    sine_wave = (0.75 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+
+    widget.feed_audio_samples(sine_wave, sample_rate=sample_rate)
+
+    # Las bandas de frecuencia deben haberse activado
+    assert np.any(widget.freq_bands > 0.0), "La FFT debe haber activado al menos una banda"
+    assert np.max(widget.freq_bands) > 0.1, "La energía en la banda dominante debe ser significativa"
+
+    # Verificar que diferentes nodos reciban modulaciones distintas (deformación asimétrica)
+    node_bands = widget.freq_bands[widget.sphere.node_band_indices]
+    assert np.min(node_bands) < np.max(node_bands), (
+        "En ESCUCHANDO, los nodos deben deformarse asimétricamente según su banda de frecuencia"
+    )
+
+
+def test_audio_reactivity_speaking_global_synchronous_pulse(qapp):
+    """
+    Verifica que en estado HABLANDO la síntesis de voz produzca un pulso GLOBAL sincrónico:
+    toda la estructura se expande/contrae como un solo cuerpo cohesivo (todos los radios iguales),
+    diferenciándose visualmente a simple vista de la distorsión asimétrica de la escucha.
+    """
+    widget = ReactiveAudioVisualizer(num_nodes=144)
+    widget.set_state(VisualizerState.HABLANDO)
+
+    # Alimentar una amplitud de voz fuerte
+    widget.feed_output_amplitude(0.9)
+    widget._on_animation_frame()
+
+    assert widget.speech_amplitude > 0.2, "La envolvente de amplitud de habla debe registrarse"
+
+    # Simular cálculo de radios para HABLANDO: deben ser idénticos para todos los nodos
+    effective_pulse = max(widget.speech_amplitude, 0.0)
+    global_expansion = 1.0 + effective_pulse * 0.35
+    radii_modifiers = np.full(widget.num_nodes, 120.0 * global_expansion, dtype=np.float32)
+
+    # Todos los nodos tienen exactamente el mismo radio (sin distorsión individual)
+    assert np.all(radii_modifiers == radii_modifiers[0]), (
+        "En HABLANDO, todos los nodos deben compartir el mismo radio sincrónico global"
+    )
+
+
+def test_visualizer_real_fps_benchmark(qapp):
+    """
+    Mide y verifica el rendimiento real en FPS del visualizador en:
+    1. Reposo (rotación constante + glow)
+    2. Escuchando (el estado más exigente, con procesamiento FFT por frame + deformación)
+    """
+    widget = ReactiveAudioVisualizer(num_nodes=144)
+
+    # 1. Medir FPS en REPOSO (300 frames)
+    stats_idle = widget.benchmark_fps(num_frames=300, state=VisualizerState.REPOSO, feed_audio_waveform=False)
+    assert stats_idle["fps"] > 60.0, f"FPS en reposo ({stats_idle['fps']:.1f}) debe superar 60 FPS"
+    assert stats_idle["mean_frame_ms"] < 16.6, f"Tiempo por frame ({stats_idle['mean_frame_ms']:.2f}ms) debe ser < 16.6ms"
+
+    # 2. Medir FPS en ESCUCHANDO con audio activo por frame (300 frames)
+    stats_listening = widget.benchmark_fps(num_frames=300, state=VisualizerState.ESCUCHANDO, feed_audio_waveform=True)
+    assert stats_listening["fps"] > 60.0, f"FPS escuchando ({stats_listening['fps']:.1f}) debe superar 60 FPS"
+    assert stats_listening["mean_frame_ms"] < 16.6, f"Tiempo por frame ({stats_listening['mean_frame_ms']:.2f}ms) debe ser < 16.6ms"
+

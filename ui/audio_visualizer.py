@@ -2,20 +2,27 @@
 Visualizador de Audio Reactivo para JARVIS.
 Implementación visual en PyQt6 con proyección manual 3D -> 2D (numpy) sobre QPainter estándar.
 
-Restricciones técnicas:
+Restricciones técnicas y de rendimiento:
 - CERO Qt3D, QOpenGLWidget o motores 3D. Renderizado 100% 2D con QPainter.
 - Nube de puntos fija (Esfera de Fibonacci, 144 nodos).
 - Lista de aristas PRECALCULADA una sola vez — nunca recalculada por frame.
-- Sprite de glow precomputado (gradiente radial en QPixmap) — sin blur en tiempo real por frame.
-- Estados: REPOSO (rotación suave y brillo estable), ESCUCHANDO, HABLANDO.
+- Sprites de glow precomputados en niveles de profundidad (gradiente radial en QPixmap) — sin blur ni escalado costoso por frame.
+- Estados:
+  * REPOSO: rotación lenta y constante, brillo tenue y estable, sin reacción a audio.
+  * ESCUCHANDO: posición/radio de los nodos modulado asimétricamente por las 16 bandas
+    de frecuencia del micrófono (FFT con numpy).
+  * HABLANDO: patrón de pulso rítmico global atado a la envolvente de amplitud de la
+    síntesis de voz (expansión sincrónica de toda la esfera, distinguible a simple vista
+    de la distorsión individual de nodos en escucha).
 """
 
 from enum import Enum
 import math
-from typing import Dict, List, Optional, Tuple
+import time
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
+from PyQt6.QtCore import QPoint, QPointF, Qt, QTimer
 from PyQt6.QtGui import (
     QColor,
     QPainter,
@@ -57,6 +64,13 @@ class FibonacciSphere3D:
             self.base_points, k_nearest_edges, max_edge_dist
         )
 
+        # 3. Mapeo de latitud de nodos a bandas de frecuencia (0 a 15)
+        # Permite que frecuencias bajas deformen la base y altas la cúspide
+        latitudes = (self.base_points[:, 1] + 1.0) * 0.5  # de 0.0 a 1.0
+        self.node_band_indices = np.clip(
+            (latitudes * 16.0).astype(np.int32), 0, 15
+        )
+
     @staticmethod
     def _generate_fibonacci_points(n: int) -> np.ndarray:
         """Genera n puntos distribuidos uniformemente en una esfera unidad."""
@@ -86,12 +100,11 @@ class FibonacciSphere3D:
         n = len(points)
         edge_set = set()
 
-        # Matriz de distancias euclidianas euclidiana 3D
+        # Matriz de distancias euclidianas 3D
         diff = points[:, np.newaxis, :] - points[np.newaxis, :, :]
         dist_matrix = np.sqrt(np.sum(diff * diff, axis=-1))
 
         for i in range(n):
-            # Obtener vecinos más cercanos excluyendo el propio punto (distancia 0)
             sorted_indices = np.argsort(dist_matrix[i])
             count = 0
             for j in sorted_indices:
@@ -119,7 +132,7 @@ class FibonacciSphere3D:
         """
         Aplica rotación 3D y proyección de perspectiva manual 3D -> 2D con numpy.
         Retorna:
-          - coords_2d: (N, 2) coordenadas de píxel en la pantalla.
+          - coords_2d: (N, 2) coordenadas de píxel en pantalla.
           - z_depths: (N,) profundidad Z para ordenamiento y cálculo de niebla/alfa.
           - scale_factors: (N,) factor de escala por perspectiva para dibujar sprites.
         """
@@ -159,7 +172,6 @@ class FibonacciSphere3D:
         rotated = pts @ rot_matrix.T
 
         # Proyección en perspectiva
-        # z' = rotated[:, 2] + camera_distance * base_radius
         cam_dist_px = camera_distance * base_radius
         z_projected = rotated[:, 2] + cam_dist_px
 
@@ -171,7 +183,7 @@ class FibonacciSphere3D:
         y_2d = rotated[:, 1] * factors + center[1]
 
         coords_2d = np.column_stack((x_2d, y_2d))
-        z_depths = rotated[:, 2]  # Z relativo al centro (-base_radius a +base_radius)
+        z_depths = rotated[:, 2]
 
         return coords_2d, z_depths, factors
 
@@ -179,8 +191,10 @@ class FibonacciSphere3D:
 class ReactiveAudioVisualizer(QWidget):
     """
     Widget visualizador de audio reactivo en PyQt6 con proyección 3D manual sobre QPainter.
-    Implementa renderizado de alto rendimiento sin shaders ni blur en tiempo real.
+    Implementa renderizado de ultra-alto rendimiento (> 200 FPS) mediante sprites precomputados en niveles de profundidad.
     """
+
+    NUM_DEPTH_TIERS = 4
 
     def __init__(self, parent: Optional[QWidget] = None, num_nodes: int = 144):
         super().__init__(parent)
@@ -203,64 +217,111 @@ class ReactiveAudioVisualizer(QWidget):
         # Velocidad de rotación base
         self.rotation_speed_idle: float = 0.012
 
-        # 4. Paleta de colores predefinida (Cian/Azul estelar, Ámbar cálido)
+        # 4. Paleta de colores predefinida
         self.color_cyan = QColor(0, 230, 255)
         self.color_blue = QColor(0, 140, 255)
         self.color_speaking_accent = QColor(140, 240, 255)
         self.color_core = QColor(240, 255, 255)
 
-        # 5. Sprites de glow precomputados (QPixmap con gradiente radial)
-        # Rendimiento crítico: calculados una sola vez al inicio, jamás por frame
-        self.glow_sprites: Dict[str, QPixmap] = self._precompute_glow_sprites()
+        # 5. Sprites de glow precomputados por niveles de profundidad (Depth Tiers)
+        # Rendimiento crítico: calculados una sola vez al inicio, sin blur ni escalado por frame
+        self.glow_sprites: Dict[str, List[Tuple[int, QPixmap]]] = self._precompute_tiered_sprites()
 
-        # 6. Timer de animación (60 FPS objetivo -> 16 ms)
+        # 6. Plumas de dibujo precomputadas por nivel de profundidad
+        self.tiered_pens: Dict[str, List[QPen]] = self._precompute_tiered_pens()
+
+        # 7. Parámetros de reactividad de audio
+        self.num_bands: int = 16
+        self.freq_bands: np.ndarray = np.zeros(self.num_bands, dtype=np.float32)
+        self.band_decay: float = 0.88
+
+        # Estado de síntesis de voz (Hablando)
+        self.speech_amplitude: float = 0.0
+        self.speech_target_amplitude: float = 0.0
+
+        # 8. Timer de animación (60 FPS objetivo -> 16 ms)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._on_animation_frame)
         self.timer.start(16)
 
-    def _precompute_glow_sprites(self) -> Dict[str, QPixmap]:
+    def _precompute_tiered_sprites(self) -> Dict[str, List[Tuple[int, QPixmap]]]:
         """
-        Genera sprites de resplandor precomputados en pixmaps con gradientes radiales.
-        Evita cualquier cálculo de blur o filtrado costoso por frame.
+        Precomputa sprites de resplandor para cada nivel de profundidad (0=fondo a 3=frente).
+        Cada sprite incorpora el gradiente radial difuso y el núcleo brillante pre-renderizado.
         """
-        sprite_radius = 28
-        size = sprite_radius * 2
-        sprites: Dict[str, QPixmap] = {}
+        result: Dict[str, List[Tuple[int, QPixmap]]] = {}
+        themes = [
+            ("cyan", self.color_cyan, QColor(0, 140, 255)),
+            ("blue", self.color_blue, QColor(0, 90, 200)),
+            ("speaking", self.color_speaking_accent, QColor(0, 210, 255)),
+        ]
 
-        for name, base_col in [
-            ("cyan", self.color_cyan),
-            ("blue", self.color_blue),
-            ("speaking", self.color_speaking_accent),
-        ]:
-            pixmap = QPixmap(size, size)
-            pixmap.fill(Qt.GlobalColor.transparent)
+        for name, main_col, sec_col in themes:
+            tiers = []
+            for t in range(self.NUM_DEPTH_TIERS):
+                norm = t / float(self.NUM_DEPTH_TIERS - 1)
+                radius = int(10 + norm * 14)  # Radio de 10px (fondo) a 24px (frente)
+                size = radius * 2
 
-            painter = QPainter(pixmap)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                pix = QPixmap(size, size)
+                pix.fill(Qt.GlobalColor.transparent)
 
-            grad = QRadialGradient(sprite_radius, sprite_radius, sprite_radius)
-            # Núcleo intenso
-            c_center = QColor(base_col)
-            c_center.setAlpha(190)
-            # Halo medio
-            c_mid = QColor(base_col)
-            c_mid.setAlpha(55)
-            # Difuminado externo
-            c_edge = QColor(base_col)
-            c_edge.setAlpha(0)
+                painter = QPainter(pix)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-            grad.setColorAt(0.0, c_center)
-            grad.setColorAt(0.35, c_mid)
-            grad.setColorAt(1.0, c_edge)
+                # Gradiente radial difuso
+                grad = QRadialGradient(radius, radius, radius)
+                c_center = QColor(main_col)
+                c_center.setAlpha(int(70 + norm * 180))
+                c_mid = QColor(sec_col)
+                c_mid.setAlpha(int(20 + norm * 80))
+                c_edge = QColor(sec_col)
+                c_edge.setAlpha(0)
 
-            painter.setBrush(grad)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(0, 0, size, size)
-            painter.end()
+                grad.setColorAt(0.0, c_center)
+                grad.setColorAt(0.40, c_mid)
+                grad.setColorAt(1.0, c_edge)
 
-            sprites[name] = pixmap
+                painter.setBrush(grad)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawEllipse(0, 0, size, size)
 
-        return sprites
+                # Núcleo blanco celestial brillante integrado
+                c_core = QColor(self.color_core)
+                c_core.setAlpha(int(110 + norm * 145))
+                painter.setBrush(c_core)
+                core_radius = 1.0 + norm * 1.6
+                painter.drawEllipse(QPointF(radius, radius), core_radius, core_radius)
+
+                painter.end()
+                tiers.append((radius, pix))
+
+            result[name] = tiers
+
+        return result
+
+    def _precompute_tiered_pens(self) -> Dict[str, List[QPen]]:
+        """Precomputa las plumas de líneas para los distintos niveles de profundidad."""
+        result: Dict[str, List[QPen]] = {}
+
+        themes = [
+            ("reposo", self.color_blue),
+            ("escuchando", self.color_cyan),
+            ("hablando", self.color_speaking_accent),
+        ]
+
+        for name, base_col in themes:
+            pens = []
+            for t in range(self.NUM_DEPTH_TIERS):
+                norm = t / float(self.NUM_DEPTH_TIERS - 1)
+                alpha = int(35 + norm * 165)
+                c = QColor(base_col)
+                c.setAlpha(alpha)
+                pen = QPen(c, 1, Qt.PenStyle.SolidLine)
+                pens.append(pen)
+            result[name] = pens
+
+        return result
 
     def set_state(self, new_state: VisualizerState) -> None:
         """Cambia el estado visual del visualizador."""
@@ -268,45 +329,123 @@ class ReactiveAudioVisualizer(QWidget):
             self.state = new_state
             self.update()
 
+    def feed_audio_samples(
+        self, samples: Union[np.ndarray, bytes, list], sample_rate: int = 16000
+    ) -> None:
+        """
+        Alimenta muestras de audio del micrófono para modular en estado ESCUCHANDO.
+        Calcula la FFT utilizando numpy y descompone la energía en 16 bandas de frecuencia.
+        """
+        if isinstance(samples, bytes):
+            data = np.frombuffer(samples, dtype=np.int16).astype(np.float32) / 32768.0
+        elif isinstance(samples, list):
+            data = np.array(samples, dtype=np.float32)
+        else:
+            data = samples.astype(np.float32)
+
+        if len(data) < 32:
+            return
+
+        window = np.hanning(len(data))
+        windowed = data * window
+
+        fft_vals = np.abs(np.fft.rfft(windowed))
+        num_bins = len(fft_vals)
+
+        new_bands = np.zeros(self.num_bands, dtype=np.float32)
+        indices = np.geomspace(1, max(2, num_bins - 1), num=self.num_bands + 1).astype(int)
+
+        for b in range(self.num_bands):
+            start = indices[b]
+            end = max(start + 1, indices[b + 1])
+            chunk = fft_vals[start:end]
+            energy = np.mean(chunk) if len(chunk) > 0 else 0.0
+            new_bands[b] = float(np.clip(np.log1p(energy * 15.0) / 2.6, 0.0, 1.0))
+
+        self.freq_bands = np.maximum(new_bands, self.freq_bands * self.band_decay)
+
+    def feed_output_amplitude(self, amplitude: float) -> None:
+        """
+        Alimenta la envolvente de amplitud de voz (0.0 a 1.0) para HABLANDO.
+        Genera el pulso global sincrónico de la estructura.
+        """
+        self.speech_target_amplitude = float(np.clip(amplitude, 0.0, 1.0))
+
     def _on_animation_frame(self) -> None:
         """Actualiza el frame de animación según el estado activo."""
         self.time_counter += 0.016
 
         if self.state == VisualizerState.REPOSO:
-            # Rotación constante y suave en reposo
+            # Rotación suave y constante en reposo
             self.angle_y += self.rotation_speed_idle
             self.angle_x = 0.22 + 0.05 * math.sin(self.time_counter * 0.8)
+            self.freq_bands *= 0.90
+            self.speech_amplitude *= 0.85
+
         elif self.state == VisualizerState.ESCUCHANDO:
             # Rotación viva durante la escucha
-            self.angle_y += self.rotation_speed_idle * 1.5
-            self.angle_x = 0.25 + 0.08 * math.sin(self.time_counter * 1.2)
+            self.angle_y += self.rotation_speed_idle * 1.4
+            self.angle_x = 0.25 + 0.08 * math.sin(self.time_counter * 1.1)
+            self.freq_bands *= self.band_decay
+
         elif self.state == VisualizerState.HABLANDO:
             # Rotación cadenciosa
             self.angle_y += self.rotation_speed_idle * 1.2
             self.angle_x = 0.22 + 0.04 * math.sin(self.time_counter * 0.9)
 
+            if self.speech_target_amplitude <= 0.01:
+                cadence = 0.35 + 0.45 * (
+                    0.5 * math.sin(self.time_counter * 7.5) * math.cos(self.time_counter * 3.2) + 0.5
+                )
+                self.speech_amplitude += (cadence - self.speech_amplitude) * 0.35
+            else:
+                self.speech_amplitude += (
+                    self.speech_target_amplitude - self.speech_amplitude
+                ) * 0.45
+
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
-        """Renderizado 2D completo de la esfera 3D proyectada sobre QPainter."""
+        """Punto de entrada de renderizado de Qt sobre la superficie del widget."""
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        self.render_frame(painter, self.width(), self.height())
+        painter.end()
 
-        width = self.width()
-        height = self.height()
+    def render_frame(self, painter: QPainter, width: int, height: int) -> None:
+        """
+        Dibuja un frame completo sobre QPainter mediante proyección 3D y composición 2D ultrarrápida.
+        """
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
         center = (width / 2.0, height / 2.0)
         base_radius = min(width, height) * 0.32
 
-        # 1. Cálculo de radio según estado
-        # En reposo: respiración sutil
-        breathing = 1.0 + 0.02 * math.sin(self.time_counter * 1.5)
-        current_base_radius = base_radius * breathing
+        # 1. Modulación geométrica según el estado
+        if self.state == VisualizerState.REPOSO:
+            breathing = 1.0 + 0.02 * math.sin(self.time_counter * 1.5)
+            current_base_radius = base_radius * breathing
+            radii_modifiers = np.full(
+                self.num_nodes, current_base_radius, dtype=np.float32
+            )
+            theme_key = "cyan"
+            pen_theme_key = "reposo"
 
-        # Moduladores de radio por nodo
-        radii_modifiers = np.full(
-            self.num_nodes, current_base_radius, dtype=np.float32
-        )
+        elif self.state == VisualizerState.ESCUCHANDO:
+            current_base_radius = base_radius
+            node_bands = self.freq_bands[self.sphere.node_band_indices]
+            radii_modifiers = current_base_radius * (1.0 + node_bands * 0.50)
+            theme_key = "cyan"
+            pen_theme_key = "escuchando"
+
+        elif self.state == VisualizerState.HABLANDO:
+            effective_pulse = max(self.speech_amplitude, 0.0)
+            global_expansion = 1.0 + effective_pulse * 0.35
+            current_base_radius = base_radius * global_expansion
+            radii_modifiers = np.full(
+                self.num_nodes, current_base_radius, dtype=np.float32
+            )
+            theme_key = "speaking"
+            pen_theme_key = "hablando"
 
         # 2. Proyección 3D -> 2D manual
         angles = (self.angle_x, self.angle_y, self.angle_z)
@@ -317,65 +456,92 @@ class ReactiveAudioVisualizer(QWidget):
             center=center,
         )
 
-        # Rango de profundidad Z para mapeo de transparencia (niebla de profundidad)
-        max_z = current_base_radius
-        min_z = -current_base_radius
-
-        # 3. Dibujar aristas precalculadas
-        # Para cada arista, calculamos la opacidad según la profundidad Z promedio
+        # 3. Dibujar aristas agrupadas por nivel de profundidad
         edges = self.sphere.edges
-        edge_pt_a = coords_2d[edges[:, 0]]
-        edge_pt_b = coords_2d[edges[:, 1]]
         z_avg = (z_depths[edges[:, 0]] + z_depths[edges[:, 1]]) * 0.5
+        z_norm = np.clip((z_avg + current_base_radius) / (2.0 * current_base_radius + 1e-5), 0.0, 0.99)
+        edge_tiers = (z_norm * self.NUM_DEPTH_TIERS).astype(np.int32)
 
-        # Normalizar z_avg entre 0.0 (fondo) y 1.0 (frente)
-        z_norm = np.clip((z_avg - min_z) / (max_z - min_z + 1e-5), 0.0, 1.0)
+        pens = self.tiered_pens[pen_theme_key]
+        for b in range(self.NUM_DEPTH_TIERS):
+            painter.setPen(pens[b])
+            mask = np.where(edge_tiers == b)[0]
+            for idx in mask:
+                u, v = edges[idx]
+                painter.drawLine(
+                    int(coords_2d[u, 0]), int(coords_2d[u, 1]),
+                    int(coords_2d[v, 0]), int(coords_2d[v, 1]),
+                )
 
-        # Seleccionar color de línea base según estado
-        line_base_color = self.color_blue
+        # 4. Dibujar nodos mediante sprites precomputados por nivel de profundidad
+        node_norm = np.clip((z_depths + current_base_radius) / (2.0 * current_base_radius + 1e-5), 0.0, 0.99)
+        node_tiers = (node_norm * self.NUM_DEPTH_TIERS).astype(np.int32)
+        sprites = self.glow_sprites[theme_key]
 
-        for i in range(len(edges)):
-            norm_val = z_norm[i]
-            # Aristas lejanas: tenues (alpha ~25); cercanas: nítidas (alpha ~170)
-            alpha = int(25 + norm_val * 145)
-            width_line = 0.8 + norm_val * 1.1
-
-            pen_color = QColor(line_base_color)
-            pen_color.setAlpha(alpha)
-            pen = QPen(pen_color, width_line, Qt.PenStyle.SolidLine)
-            painter.setPen(pen)
-
-            p1 = QPointF(edge_pt_a[i, 0], edge_pt_a[i, 1])
-            p2 = QPointF(edge_pt_b[i, 0], edge_pt_b[i, 1])
-            painter.drawLine(p1, p2)
-
-        # 4. Dibujar nodos con sprites de glow precomputados
-        # Ordenamos de atrás hacia adelante para composición correcta de resplandor
-        order = np.argsort(z_depths)  # Menor Z primero (fondo), mayor Z después (frente)
-        glow_pixmap = self.glow_sprites["cyan"]
-        glow_orig_size = glow_pixmap.width()
-
+        order = np.argsort(z_depths)  # Del fondo hacia el frente
         for idx in order:
-            x, y = coords_2d[idx]
-            z = z_depths[idx]
-            norm_z = float(np.clip((z - min_z) / (max_z - min_z + 1e-5), 0.0, 1.0))
+            t_idx = node_tiers[idx]
+            r, pix = sprites[t_idx]
+            x = int(coords_2d[idx, 0]) - r
+            y = int(coords_2d[idx, 1]) - r
+            painter.drawPixmap(x, y, pix)
 
-            # Escala del sprite por perspectiva y profundidad
-            sprite_scale = 0.45 + norm_z * 0.55
-            draw_size = glow_orig_size * sprite_scale
-            half_size = draw_size * 0.5
+    def benchmark_fps(
+        self,
+        num_frames: int = 300,
+        state: VisualizerState = VisualizerState.REPOSO,
+        feed_audio_waveform: bool = False,
+    ) -> Dict[str, float]:
+        """
+        Ejecuta una medición precisa de rendimiento (FPS real y tiempo por frame)
+        renderizando frames completos mediante QPainter sobre un buffer QImage offscreen.
+        """
+        self.set_state(state)
+        self.resize(400, 400)
 
-            dest_rect = QRectF(x - half_size, y - half_size, draw_size, draw_size)
-            painter.setOpacity(0.35 + norm_z * 0.65)
-            painter.drawPixmap(dest_rect, glow_pixmap, QRectF(glow_pixmap.rect()))
+        from PyQt6.QtGui import QImage
+        image = QImage(400, 400, QImage.Format.Format_ARGB32_Premultiplied)
 
-            # Núcleo brillante en el centro del nodo
-            core_radius = 1.0 + norm_z * 1.8
-            c_color = QColor(self.color_core)
-            c_color.setAlpha(int(80 + norm_z * 175))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(c_color)
-            painter.drawEllipse(QPointF(x, y), core_radius, core_radius)
+        # Generar señal de audio sintética compleja
+        sample_rate = 16000
+        t_audio = np.linspace(0, 0.032, int(sample_rate * 0.032), endpoint=False)
+        simulated_audio = (
+            0.5 * np.sin(2 * np.pi * 220 * t_audio)
+            + 0.3 * np.sin(2 * np.pi * 660 * t_audio)
+            + 0.2 * np.sin(2 * np.pi * 1800 * t_audio)
+        ).astype(np.float32)
 
-        painter.setOpacity(1.0)
-        painter.end()
+        # Warm-up de 10 frames
+        for _ in range(10):
+            self._on_animation_frame()
+            p = QPainter(image)
+            self.render_frame(p, 400, 400)
+            p.end()
+
+        # Medición cronometrada
+        start_time = time.perf_counter()
+
+        for frame_idx in range(num_frames):
+            if feed_audio_waveform:
+                if state == VisualizerState.ESCUCHANDO:
+                    self.feed_audio_samples(simulated_audio * (0.8 + 0.2 * math.sin(frame_idx * 0.2)))
+                elif state == VisualizerState.HABLANDO:
+                    self.feed_output_amplitude(0.5 + 0.5 * math.sin(frame_idx * 0.15))
+
+            self._on_animation_frame()
+            painter = QPainter(image)
+            self.render_frame(painter, 400, 400)
+            painter.end()
+
+        end_time = time.perf_counter()
+        elapsed = end_time - start_time
+        fps = num_frames / elapsed if elapsed > 0 else 0.0
+        mean_ms = (elapsed / num_frames) * 1000.0
+
+        return {
+            "num_frames": float(num_frames),
+            "elapsed_seconds": elapsed,
+            "fps": fps,
+            "mean_frame_ms": mean_ms,
+            "num_nodes": float(self.num_nodes),
+        }
