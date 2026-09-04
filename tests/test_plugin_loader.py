@@ -137,6 +137,7 @@ def test_nuc_03_invoke_requires_confirmation_without_user_confirmed(
         "name": "Code Runner",
         "version": "1.0.0",
         "capabilities": ["code_execution"],
+        "is_curated": True,
         "actions": [
             {
                 "name": "run_snippet",
@@ -436,6 +437,7 @@ def test_dispatcher_adversarial_confirmation_not_shared_across_plugins(
         "name": "Plugin A",
         "version": "1.0.0",
         "capabilities": ["filesystem_write"],
+        "is_curated": True,
         "actions": [
             {
                 "name": "write_data",
@@ -582,4 +584,132 @@ def test_dispatcher_adversarial_handler_typeerror_executes_only_once(
     assert res["reason"] == "execution_error"
     assert "TypeError" in res.get("error", "") or "concatenate" in res.get("error", "")
     assert call_count == 1, f"El handler se ejecutó {call_count} veces (debe ser exactamente 1)"
+
+
+def test_dispatcher_adversarial_unregistered_or_unverified_plugin_ignores_cache(
+    loader: PluginLoader, temp_audit_logger: AuditLogger, tmp_path: Path
+):
+    """
+    Test adversarial: Un plugin no registrado o con status='no_verificado'
+    NUNCA usa la caché de confirmación por sesión, sin importar qué otro
+    plugin ya haya confirmado esa capacidad.
+    """
+    from core.plugin_registry import PluginRegistry
+
+    db_path = tmp_path / "test_unverified_cache.db"
+    reg = PluginRegistry(db_path=db_path)
+
+    # 1. Plugin curado (ej. plugin_trusted)
+    reg.register_plugin("plugin_trusted", "a" * 40, "https://local/trusted")
+    reg.promote_to_curated("plugin_trusted", "auditor_test")
+
+    # 2. Plugin no verificado (status='no_verificado')
+    reg.register_plugin("plugin_unverified", "b" * 40, "https://local/unverified")
+
+    # 3. Registrar los 3 plugins en el loader
+    manifest_trusted = {
+        "schema_version": "1",
+        "id": "plugin_trusted",
+        "name": "Trusted Plugin",
+        "version": "1.0.0",
+        "capabilities": ["filesystem_write"],
+        "actions": [{"name": "write", "capability": "filesystem_write"}],
+    }
+    manifest_unverified = {
+        "schema_version": "1",
+        "id": "plugin_unverified",
+        "name": "Unverified Plugin",
+        "version": "1.0.0",
+        "capabilities": ["filesystem_write"],
+        "actions": [{"name": "write", "capability": "filesystem_write"}],
+    }
+    manifest_unregistered = {
+        "schema_version": "1",
+        "id": "plugin_unregistered",
+        "name": "Unregistered Plugin",
+        "version": "1.0.0",
+        "capabilities": ["filesystem_write"],
+        "actions": [{"name": "write", "capability": "filesystem_write"}],
+    }
+
+    loader_inst = PluginLoader(audit_logger=temp_audit_logger, plugin_registry=reg)
+    loader_inst.register_programmatic_plugin(
+        manifest_trusted, handlers={"write": lambda **kw: "trusted_written"}
+    )
+    loader_inst.register_programmatic_plugin(
+        manifest_unverified, handlers={"write": lambda **kw: "unverified_written"}
+    )
+    loader_inst.register_programmatic_plugin(
+        manifest_unregistered, handlers={"write": lambda **kw: "unregistered_written"}
+    )
+
+    dispatcher = Dispatcher(
+        plugin_loader=loader_inst,
+        version_profile="core_full",
+        audit_logger=temp_audit_logger,
+        plugin_registry=reg,
+    )
+
+    session = "sess_adversarial"
+
+    # Paso A: Confirmar para plugin_trusted -> debe ejecutarse y cachearse
+    res_t1 = dispatcher.invoke(
+        "plugin_trusted.write",
+        params={"f": "1"},
+        user_confirmed=True,
+        session_id=session,
+    )
+    assert res_t1["ok"] is True
+    # Invocación subsecuente para plugin_trusted pasa por caché
+    res_t2 = dispatcher.invoke(
+        "plugin_trusted.write",
+        params={"f": "2"},
+        user_confirmed=False,
+        session_id=session,
+    )
+    assert res_t2["ok"] is True
+
+    # Paso B: Invocación en plugin_unverified con confirmación explícita -> ejecuta pero NO cachea
+    res_uv1 = dispatcher.invoke(
+        "plugin_unverified.write",
+        params={"f": "3"},
+        user_confirmed=True,
+        session_id=session,
+    )
+    assert res_uv1["ok"] is True
+    assert res_uv1["result"] == "unverified_written"
+
+    # Invocación subsecuente en plugin_unverified sin confirmación en la MISMA sesión:
+    # NUNCA debe usar la caché; debe volver a exigir confirmación
+    res_uv2 = dispatcher.invoke(
+        "plugin_unverified.write",
+        params={"f": "4"},
+        user_confirmed=False,
+        session_id=session,
+    )
+    assert res_uv2["ok"] is False
+    assert res_uv2["reason"] == "needs_confirmation"
+
+    # Paso C: Invocación en plugin_unregistered (no existe en registro):
+    # Ejecuta con user_confirmed=True pero NO cachea
+    res_ur1 = dispatcher.invoke(
+        "plugin_unregistered.write",
+        params={"f": "5"},
+        user_confirmed=True,
+        session_id=session,
+    )
+    assert res_ur1["ok"] is True
+    assert res_ur1["result"] == "unregistered_written"
+
+    # Invocación subsecuente en plugin_unregistered sin confirmación en la MISMA sesión:
+    # NUNCA debe usar la caché; debe volver a exigir confirmación
+    res_ur2 = dispatcher.invoke(
+        "plugin_unregistered.write",
+        params={"f": "6"},
+        user_confirmed=False,
+        session_id=session,
+    )
+    assert res_ur2["ok"] is False
+    assert res_ur2["reason"] == "needs_confirmation"
+
 

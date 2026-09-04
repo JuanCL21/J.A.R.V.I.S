@@ -11,13 +11,39 @@ import importlib.util
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
+import subprocess
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from .audit_log import AuditLogger, default_audit_logger
 from .capability_catalog import is_valid_capability, validate_capabilities
+from .plugin_registry import PluginRegistry
 from .version_profiles import get_profile_capabilities, is_capability_allowed
 
 SUPPORTED_SCHEMA_VERSIONS = {"1"}
+
+
+def get_disk_commit_hash(dir_path: Path) -> Optional[str]:
+    """
+    Intenta resolver el commit hash del código en disco si reside en un repositorio Git.
+    Retorna None si no es un repositorio Git, si git no está disponible, o si hay un error.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "log", "-1", "--format=%H", "--", "."],
+            cwd=str(dir_path if dir_path.is_dir() else dir_path.parent),
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+            check=False,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            sha = proc.stdout.strip().lower()
+            if re.match(r"^[0-9a-fA-F]{40}$", sha):
+                return sha
+    except Exception:
+        pass
+    return None
 
 
 @dataclass
@@ -26,6 +52,7 @@ class ActionDefinition:
     capability: str
     description: str = ""
     handler: Optional[Callable[..., Any]] = None
+    is_curated: bool = False
 
 
 @dataclass
@@ -36,14 +63,21 @@ class PluginManifest:
     version: str
     capabilities: List[str] = field(default_factory=list)
     actions: List[ActionDefinition] = field(default_factory=list)
+    status: str = "no_verificado"
+    is_curated: bool = False
 
 
 class PluginLoader:
-    def __init__(self, audit_logger: Optional[AuditLogger] = None):
+    def __init__(
+        self,
+        audit_logger: Optional[AuditLogger] = None,
+        plugin_registry: Optional[PluginRegistry] = None,
+    ):
         self.loaded_plugins: Dict[str, PluginManifest] = {}
         # Mapeo de "plugin_id.action_name" -> ActionDefinition
         self.registered_actions: Dict[str, ActionDefinition] = {}
         self.audit_logger = audit_logger or default_audit_logger
+        self.plugin_registry = plugin_registry or PluginRegistry()
 
     def parse_manifest_dict(self, data: Dict[str, Any]) -> PluginManifest:
         """
@@ -150,6 +184,7 @@ class PluginLoader:
                 capability=action.capability,
                 description=action.description,
                 handler=handler,
+                is_curated=manifest.is_curated,
             )
 
             # Registro con namespace obligatorio: plugin_id.action_name
@@ -194,6 +229,25 @@ class PluginLoader:
                 )
                 return False
 
+        # TODO (BRECHA DE INTEGRIDAD SUBFASE A/C): Brecha entre commit_hash registrado y código real en disco.
+        # Actualmente, plugin_registry almacena active_commit_hash, pero el código cargado desde disco
+        # (plugins/<plugin_id>/plugin.py) no cuenta con verificación criptográfica de firma o hash de archivo
+        # (sha256/HMAC) al momento de importar. Si el archivo es modificado localmente fuera de Git, el loader
+        # no puede detectar la alteración física sin un manifiesto firmado o archivo de metadatos (.jarvis_meta).
+        # Esta brecha se documenta como PENDIENTE para la fase de empaquetado seguro de plugins.
+
+        # Consulta al registro de plugins para verificar status='curado' del par (plugin_id, commit_hash)
+        disk_commit = get_disk_commit_hash(dir_path)
+        is_curated = False
+        if self.plugin_registry:
+            is_curated = self.plugin_registry.is_curated(manifest.id, commit_hash=disk_commit)
+            if not is_curated and disk_commit is None:
+                # Si no hay git en el directorio, verificar por plugin_id
+                is_curated = self.plugin_registry.is_curated(manifest.id)
+
+        manifest.is_curated = is_curated
+        manifest.status = "curado" if is_curated else "no_verificado"
+
         # Cargar plugin.py si existe
         plugin_py = dir_path / "plugin.py"
         module = None
@@ -219,11 +273,23 @@ class PluginLoader:
         manifest_data: Dict[str, Any],
         handlers: Dict[str, Callable[..., Any]],
         version_profile: Optional[str] = None,
+        is_curated: Optional[bool] = None,
     ) -> bool:
         """
         Registra un plugin directamente a partir de un dict y handlers (útil para tests y plugins en memoria).
         """
         manifest = self.parse_manifest_dict(manifest_data)
+
+        if is_curated is not None:
+            manifest.is_curated = is_curated
+        elif manifest_data.get("is_curated") is not None:
+            manifest.is_curated = bool(manifest_data["is_curated"])
+        elif self.plugin_registry and self.plugin_registry.is_curated(manifest.id):
+            manifest.is_curated = True
+        else:
+            manifest.is_curated = False
+
+        manifest.status = "curado" if manifest.is_curated else "no_verificado"
 
         if version_profile:
             allowed_caps = get_profile_capabilities(version_profile)

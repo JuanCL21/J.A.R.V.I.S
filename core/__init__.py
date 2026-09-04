@@ -30,7 +30,12 @@ from .secrets import load_secrets, get_secret, set_secret
 from .logging_setup import setup_logging, get_logger
 from .plugin_loader import PluginLoader, PluginManifest, ActionDefinition
 from .dispatcher import Dispatcher
-from .plugin_registry import PluginRegistry, resolve_db_path
+from .plugin_registry import (
+    PluginRegistry,
+    resolve_db_path,
+    FIRST_PARTY_PLUGINS,
+    migrate_first_party_plugins,
+)
 from .plugin_installer import (
     PluginInstaller,
     install_from_catalog,
@@ -55,6 +60,8 @@ __all__ = [
     "default_audit_logger",
     "PluginRegistry",
     "resolve_db_path",
+    "FIRST_PARTY_PLUGINS",
+    "migrate_first_party_plugins",
     "PluginInstaller",
     "install_from_catalog",
     "install_from_url",

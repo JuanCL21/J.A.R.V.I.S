@@ -276,3 +276,67 @@ def test_plugin_registry_db_path_independent_of_process_cwd_and_no_spurious_crea
     # Al invocar una operación que requiere conexión, se inicializa perezosamente (lazy)
     assert reg_env.list_plugins() == []
     assert custom_db_file.exists(), "El archivo de DB debe crearse solo cuando se requiere conexión"
+
+
+# ============================================================================
+# TEST REQUERIDO: Migración de plugins de primera parte con fechas reales de Git
+# ============================================================================
+def test_migration_toy_and_open_interpreter_curated_with_real_dates(tmp_path: Path):
+    """
+    Verifica que la migración de plugins de primera parte (toy y open_interpreter)
+    los registre en plugin_registry y los promueva a status='curado' con los
+    commit hashes y fechas históricas reales de git log.
+    """
+    import subprocess
+    from core.plugin_registry import FIRST_PARTY_PLUGINS, migrate_first_party_plugins
+
+    db_path = tmp_path / "test_migration.db"
+    reg = PluginRegistry(db_path=db_path)
+    migrate_first_party_plugins(reg)
+
+    toy = reg.get_plugin("toy")
+    assert toy is not None
+    assert toy["status"] == "curado"
+    assert toy["reviewed_by"] == "aprobado en Fase 2 (TOY-01 a TOY-03)"
+
+    oi = reg.get_plugin("open_interpreter")
+    assert oi is not None
+    assert oi["status"] == "curado"
+    assert oi["reviewed_by"] == "aprobado en Fase 4 (OI-01 a OI-08)"
+
+    # Igual rigor que install_from_catalog: verificar contra git log real
+    proc_toy_hash = subprocess.run(
+        ["git", "log", "-1", "--format=%H", "--", "plugins/toy/"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    proc_toy_date = subprocess.run(
+        ["git", "log", "-1", "--format=%aI", "--", "plugins/toy/"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert toy["active_commit_hash"] == proc_toy_hash.stdout.strip().lower()
+    assert toy["reviewed_at"] == proc_toy_date.stdout.strip()
+    assert toy["promoted_at"] == proc_toy_date.stdout.strip()
+
+    proc_oi_hash = subprocess.run(
+        ["git", "log", "-1", "--format=%H", "--", "plugins/open_interpreter/"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    proc_oi_date = subprocess.run(
+        ["git", "log", "-1", "--format=%aI", "--", "plugins/open_interpreter/"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert oi["active_commit_hash"] == proc_oi_hash.stdout.strip().lower()
+    assert oi["reviewed_at"] == proc_oi_date.stdout.strip()
+    assert oi["promoted_at"] == proc_oi_date.stdout.strip()
+
+    assert reg.is_curated("toy", toy["active_commit_hash"]) is True
+    assert reg.is_curated("open_interpreter", oi["active_commit_hash"]) is True
+

@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, Optional, Set, Tuple
 from .audit_log import AuditLogger, default_audit_logger
 from .capability_catalog import capability_requires_confirmation
 from .plugin_loader import ActionDefinition, PluginLoader
+from .plugin_registry import PluginRegistry
 from .version_profiles import is_capability_allowed
 
 # Centinela para detectar si session_id fue provisto explícitamente en reset_session_confirmations
@@ -28,11 +29,17 @@ class Dispatcher:
         version_profile: str = "core_lite",
         audit_logger: Optional[AuditLogger] = None,
         rate_limit_hook: Optional[Callable[[str, str], bool]] = None,
+        plugin_registry: Optional[PluginRegistry] = None,
     ):
         self.plugin_loader = plugin_loader
         self.version_profile = version_profile
         self.audit_logger = audit_logger or default_audit_logger
         self.rate_limit_hook = rate_limit_hook
+        self.plugin_registry = (
+            plugin_registry
+            or getattr(plugin_loader, "plugin_registry", None)
+            or PluginRegistry()
+        )
 
         # Caché de confirmaciones de usuario por (plugin_id, capability, session_id)
         # Si session_id es None, se trata como clave estable e identificada para el proceso.
@@ -140,10 +147,25 @@ class Dispatcher:
         # La clave de caché aísla estrictamente (plugin_id, capability, session_id)
         if capability_requires_confirmation(capability):
             confirmation_key = (plugin_id, capability, session_id)
-            if confirmation_key not in self.session_confirmed_capabilities:
+
+            # TODO (BRECHA DE INTEGRIDAD SUBFASE A/C): Consulta por plugin_id en el momento de invocar
+            # Verificación de confianza: Un plugin 'no_verificado' o no registrado NUNCA usa caché de sesión.
+            is_curated = False
+            if action_def and getattr(action_def, "is_curated", False):
+                is_curated = True
+            elif self.plugin_registry is not None and self.plugin_registry.is_curated(plugin_id):
+                is_curated = True
+
+            # Solo si el plugin es curado se permite consultar la caché de confirmación
+            if is_curated and confirmation_key in self.session_confirmed_capabilities:
+                pass
+            else:
                 if user_confirmed:
-                    # El usuario confirma en esta llamada: cachear para el resto de la sesión
-                    self.session_confirmed_capabilities.add(confirmation_key)
+                    # El usuario confirma en esta llamada:
+                    # SOLO se cachea si el plugin cuenta con status='curado'.
+                    # Plugins 'no_verificado' o no registrados deben exigir confirmación física SIEMPRE.
+                    if is_curated:
+                        self.session_confirmed_capabilities.add(confirmation_key)
                 else:
                     self.audit_logger.log_invocation(
                         plugin_id=plugin_id,
@@ -152,7 +174,7 @@ class Dispatcher:
                         allowed=False,
                         result_status="needs_confirmation",
                         reason="needs_confirmation",
-                        details={"params": params, "session_id": session_id},
+                        details={"params": params, "session_id": session_id, "is_curated": is_curated},
                     )
                     return {
                         "ok": False,

@@ -251,5 +251,42 @@ class PluginRegistry:
         return True
 
 
-# TODO: default_plugin_registry a nivel de módulo eliminado para evitar efectos secundarios en imports.
-# Instanciar PluginRegistry(db_path=...) explícitamente donde se requiera.
+# ============================================================================
+# Migración de plugins de primera parte (toy, open_interpreter)
+# Registra y promueve a 'curado' con sus commits y fechas históricas de Git.
+# ============================================================================
+FIRST_PARTY_PLUGINS: Dict[str, Dict[str, str]] = {
+    "toy": {
+        "active_commit_hash": "218b3d340a4a974b9b71d36373ae447245f785e3",
+        "source_url": "https://github.com/local/jarvis",
+        "reviewed_by": "aprobado en Fase 2 (TOY-01 a TOY-03)",
+        "reviewed_at": "2026-09-02T13:43:50-07:00",
+    },
+    "open_interpreter": {
+        "active_commit_hash": "305d273654bf3511082adfc15319b5162e97ea14",
+        "source_url": "https://github.com/local/jarvis",
+        "reviewed_by": "aprobado en Fase 4 (OI-01 a OI-08)",
+        "reviewed_at": "2026-09-02T21:53:54-07:00",
+    },
+}
+
+
+def migrate_first_party_plugins(registry: Optional[PluginRegistry] = None) -> None:
+    """
+    Registra y promueve a 'curado' los plugins de primera parte en plugin_registry,
+    preservando los hashes de commit reales y las fechas de autoría históricas de git log.
+    """
+    reg = registry or PluginRegistry()
+    for plugin_id, data in FIRST_PARTY_PLUGINS.items():
+        reg.register_plugin(
+            plugin_id=plugin_id,
+            active_commit_hash=data["active_commit_hash"],
+            source_url=data["source_url"],
+        )
+        reg.promote_to_curated(
+            plugin_id=plugin_id,
+            reviewed_by=data["reviewed_by"],
+            reviewed_at=data["reviewed_at"],
+            promoted_at=data["reviewed_at"],
+        )
+
