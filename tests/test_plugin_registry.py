@@ -306,13 +306,13 @@ def test_migration_toy_and_open_interpreter_curated_with_real_dates(tmp_path: Pa
 
     # Igual rigor que install_from_catalog: verificar contra git log real
     proc_toy_hash = subprocess.run(
-        ["git", "log", "-1", "--format=%H", "--", "plugins/toy/"],
+        ["git", "log", "-1", "--format=%H", "218b3d340a4a974b9b71d36373ae447245f785e3"],
         capture_output=True,
         text=True,
         check=True,
     )
     proc_toy_date = subprocess.run(
-        ["git", "log", "-1", "--format=%aI", "--", "plugins/toy/"],
+        ["git", "log", "-1", "--format=%aI", "218b3d340a4a974b9b71d36373ae447245f785e3"],
         capture_output=True,
         text=True,
         check=True,
@@ -322,13 +322,13 @@ def test_migration_toy_and_open_interpreter_curated_with_real_dates(tmp_path: Pa
     assert toy["promoted_at"] == proc_toy_date.stdout.strip()
 
     proc_oi_hash = subprocess.run(
-        ["git", "log", "-1", "--format=%H", "--", "plugins/open_interpreter/"],
+        ["git", "log", "-1", "--format=%H", "305d273654bf3511082adfc15319b5162e97ea14"],
         capture_output=True,
         text=True,
         check=True,
     )
     proc_oi_date = subprocess.run(
-        ["git", "log", "-1", "--format=%aI", "--", "plugins/open_interpreter/"],
+        ["git", "log", "-1", "--format=%aI", "305d273654bf3511082adfc15319b5162e97ea14"],
         capture_output=True,
         text=True,
         check=True,

@@ -55,15 +55,25 @@ def set_secret(
     value: str,
     env_path: str | Path = ".env",
 ) -> None:
-    """Guarda o actualiza un secreto en el archivo .env y asegura permisos 0600."""
+    """Guarda o actualiza un secreto en el archivo .env con permisos 0600 atómicos desde la creación."""
     path = Path(env_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     secrets = load_secrets(path)
     secrets[key] = value
 
-    with open(path, "w", encoding="utf-8") as f:
-        for k, v in secrets.items():
-            f.write(f"{k}={v}\n")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
 
-    _enforce_secure_permissions(path)
+    # Creación atómica con modo 0o600 (sin ventana de lectura/exposición bajo umask por defecto)
+    fd = os.open(path, flags, 0o600)
+    try:
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)
+        with open(fd, "w", encoding="utf-8", closefd=False) as f:
+            for k, v in secrets.items():
+                f.write(f"{k}={v}\n")
+    finally:
+        os.close(fd)
+
