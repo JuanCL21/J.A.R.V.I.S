@@ -12,10 +12,12 @@ Revisión de auditor y seguridad:
 
 import os
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Set
+from typing import Dict, Iterable, List, Optional, Set
 
-# Subdirectorios, archivos y patrones sensibles protegidos estructuralmente por prefijo/substring
-_SENSITIVE_SUBDIRS: Set[str] = {
+# Componentes de ruta exactos (directorios/subdirectorios) protegidos estructuralmente
+# La coincidencia se realiza por COMPONENTES EXACTOS de ruta (Path.parts), evitando falsos positivos
+# por substrings en nombres legítimos como 'digital_art/' o 'mi_credentials_guide/'.
+_SENSITIVE_DIR_COMPONENTS: Set[str] = {
     ".ssh",
     ".aws",
     ".gnupg",
@@ -23,16 +25,32 @@ _SENSITIVE_SUBDIRS: Set[str] = {
     ".kube",
     ".password-store",
     ".mozilla",
-    ".config/google-chrome",
-    ".config/chromium",
-    ".config/BraveSoftware",
-    ".config/microsoft-edge",
     ".git",
+    "credentials",
+}
+
+# Subdirectorios compuestos protegidos estructuralmente (secuencia ordenada de componentes)
+_SENSITIVE_COMPOUND_DIRS: List[List[str]] = [
+    [".config", "google-chrome"],
+    [".config", "chromium"],
+    [".config", "BraveSoftware"],
+    [".config", "microsoft-edge"],
+]
+
+# Patrones sensibles en nombres de archivo (protección estricta de credenciales y secretos)
+# Se mantienen por substring en el nombre de archivo (filename) para evitar la vulnerabilidad
+# original de JARVIS_Custom (donde variantes como 'credentials_prod.json' o 'my_credentials.txt'
+# no eran bloqueadas si solo se comparaba por nombre exacto).
+_SENSITIVE_FILE_PATTERNS: Set[str] = {
     ".env",
     "credentials",
     "id_rsa",
     "id_ed25519",
 }
+
+# Compatibilidad con módulos que importen _SENSITIVE_SUBDIRS históricamente
+_SENSITIVE_SUBDIRS: Set[str] = _SENSITIVE_DIR_COMPONENTS | _SENSITIVE_FILE_PATTERNS
+
 
 # Allowlist de extensiones seguras por defecto (Opción B: protege contra archivos ejecutables/secretos)
 DEFAULT_ALLOWED_EXTENSIONS: Set[str] = {
@@ -141,16 +159,21 @@ def is_safe_path(
     target_path: str | Path,
     sandbox_root: Optional[str | Path] = None,
     allowed_extensions: Optional[Iterable[str]] = None,
+    allow_directory: bool = False,
+    is_directory: Optional[bool] = None,
 ) -> bool:
     """
     Verifica que la ruta objetivo:
     1. Se encuentre estrictamente confinada dentro de sandbox_root (sin escapar vía '..').
-    2. No acceda a ningún directorio o archivo en _SENSITIVE_SUBDIRS
-       (coincidencia por partes, prefijo y substring: .env*, *credentials*, id_rsa*, etc.).
-    3. Cumpla con una lista de extensiones permitidas:
-       - Si allowed_extensions se especifica, se valida contra dicha lista.
-       - Si allowed_extensions es None, se aplica la allowlist por defecto DEFAULT_ALLOWED_EXTENSIONS
-         (Decisión de diseño: Opción B, garantizando que nunca opere como blacklist pura).
+    2. No acceda a ningún directorio sensible en _SENSITIVE_DIR_COMPONENTS
+       (coincidencia por COMPONENTES EXACTOS de ruta en Path.parts, evitando falsos positivos
+       por substring libre en nombres legítimos como 'digital_art/' o 'mi_credentials_guide/').
+    3. Para directorios (modo allow_directory=True o is_directory=True):
+       - Permite sufijo vacío sin forzar extensiones de archivo.
+    4. Para archivos (modo allow_directory=False):
+       - No contenga patrones de secretos en el nombre de archivo (_SENSITIVE_FILE_PATTERNS:
+         .env, credentials, id_rsa, etc., por substring para evitar la vulnerabilidad histórica).
+       - Cumpla con una lista de extensiones permitidas (DEFAULT_ALLOWED_EXTENSIONS si None).
     """
     try:
         root = resolve_sandbox_root(sandbox_root).resolve()
@@ -164,31 +187,42 @@ def is_safe_path(
 
         # 1. Confinamiento dentro del sandbox
         try:
-            rel_path = resolved_target.relative_to(root)
+            resolved_target.relative_to(root)
         except ValueError:
             # Está fuera del sandbox root
             return False
 
-        # 2. Comprobación contra subdirectorios/archivos sensibles por substring y prefijo
-        target_str = str(resolved_target)
-        target_parts = set(resolved_target.parts)
+        # 2. Comprobación contra componentes exactos de ruta sensibles (Path.parts)
+        # Evita falsos positivos por substrings en directorios como 'digital_art' o 'mi_credentials_guide'
+        target_parts_lower = [p.lower() for p in resolved_target.parts]
+        for sensitive_dir in _SENSITIVE_DIR_COMPONENTS:
+            if sensitive_dir.lower() in target_parts_lower:
+                return False
+
+        # Comprobación de subdirectorios compuestos (ej. .config/google-chrome)
+        for compound in _SENSITIVE_COMPOUND_DIRS:
+            c_len = len(compound)
+            compound_lower = [c.lower() for c in compound]
+            for i in range(len(target_parts_lower) - c_len + 1):
+                if target_parts_lower[i : i + c_len] == compound_lower:
+                    return False
+
+        # 3. Validación según modo: directorio vs archivo
+        is_dir_mode = bool(allow_directory or (is_directory is True))
+        if is_dir_mode:
+            # En modo directorio se permite sufijo vacío y no se exige extensión de archivo
+            return True
+
+        # 4. Modo archivo: comprobación de patrones sensibles en el nombre de archivo (filename)
         filename_lower = resolved_target.name.lower()
+        for sensitive_pattern in _SENSITIVE_FILE_PATTERNS:
+            if sensitive_pattern.lower() in filename_lower:
+                return False
 
-        for sensitive in _SENSITIVE_SUBDIRS:
-            sensitive_lower = sensitive.lower()
-            if "/" in sensitive_lower:
-                # Caso de subdirectorios compuestos como .config/google-chrome
-                if sensitive_lower in target_str.lower():
-                    return False
-            else:
-                # Comprobar si el nombre del archivo o alguna parte contiene el patrón sensible
-                if sensitive_lower in filename_lower:
-                    return False
-                if any(sensitive_lower in part.lower() for part in target_parts):
-                    return False
-
-        # 3. Allowlist de extensiones (por defecto DEFAULT_ALLOWED_EXTENSIONS si None)
-        effective_allowed = allowed_extensions if allowed_extensions is not None else DEFAULT_ALLOWED_EXTENSIONS
+        # 5. Allowlist de extensiones para archivos (por defecto DEFAULT_ALLOWED_EXTENSIONS si None)
+        effective_allowed = (
+            allowed_extensions if allowed_extensions is not None else DEFAULT_ALLOWED_EXTENSIONS
+        )
         normalized_allowed = {
             ext.lower() if ext.startswith(".") else f".{ext.lower()}"
             for ext in effective_allowed

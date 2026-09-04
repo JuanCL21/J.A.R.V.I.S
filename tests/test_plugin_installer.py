@@ -398,3 +398,48 @@ def test_install_from_url_adversarial_propagates_rejection(test_env):
     with pytest.raises(ValueError, match="plugin_id inválido"):
         installer.install_from_catalog("-malicious_catalog_id")
     assert registry.get_plugin("-malicious_catalog_id") is None
+
+
+def test_resolve_git_ref_adversarial_rejects_ext_scheme_and_non_https(monkeypatch: pytest.MonkeyPatch):
+    """
+    TEST ADVERSARIAL REQUERIDO 1:
+    Verifica que resolve_git_ref() rechace esquemas distintos de 'https://' o directorios
+    locales existentes (ej. ext::, ssh://, git://, file://, http://, etc.) levantando
+    ValueError ANTES de ejecutar ningún subprocess.run.
+    """
+    def mock_subprocess_run(*args, **kwargs):
+        raise AssertionError(
+            f"VULNERABILIDAD CRÍTICA DETECTADA: subprocess.run fue invocado con transporte no seguro: {args} {kwargs}!"
+        )
+
+    monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+    disallowed_urls = [
+        "ext::sh -c touch /tmp/pwned",
+        "ext::cat /etc/passwd",
+        "ssh://git@github.com/org/repo.git",
+        "git://github.com/org/repo.git",
+        "file:///tmp/repo.git",
+        "http://github.com/org/repo.git",
+        "ftp://github.com/org/repo.git",
+        "HTTPS://github.com/org/repo.git",
+        "https:github.com/org/repo.git",
+        "git::https://github.com/org/repo.git",
+        "https://github.com/org/repo.git::ext",
+        "/nonexistent/local/dir/that/does/not/exist",
+    ]
+
+    for bad_url in disallowed_urls:
+        with pytest.raises(ValueError):
+            resolve_git_ref(source_url=bad_url, ref="HEAD")
+
+
+def test_resolve_git_ref_adversarial_still_allows_local_test_repo(local_git_repo: Path):
+    """
+    TEST ADVERSARIAL REQUERIDO 2:
+    Verifica que resolve_git_ref() mantenga soporte para repositorios locales existentes
+    (utilizados por fixtures de tests y entornos aislados) resolviendo su commit hash concreto.
+    """
+    resolved_commit = resolve_git_ref(source_url=str(local_git_repo), ref="HEAD")
+    assert re.match(r"^[0-9a-f]{40}$", resolved_commit)
+

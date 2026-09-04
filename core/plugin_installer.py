@@ -105,9 +105,12 @@ def resolve_git_ref(source_url: str, ref: str = "HEAD") -> str:
     (HEAD, rama, tag o hash directo) en el repositorio remoto o local especificado por source_url.
     NUNCA devuelve ni persiste la referencia mutable.
 
-    REGLAS DE SEGURIDAD (ANTI-INYECCIÓN DE ARGUMENTOS):
+    REGLAS DE SEGURIDAD (ANTI-INYECCIÓN DE ARGUMENTOS Y TRANSPORTE SEGURO):
     1. Rechazo explícito (fail-closed) ANTES de invocar procesos si source_url o ref empiezan con '-'.
-    2. Defensa en profundidad mediante '--' en git ls-remote y '--end-of-options' en git rev-parse.
+    2. Allowlist estricta de esquemas en source_url: únicamente 'https://' para repos remotos o rutas
+       de directorios locales existentes. Cualquier otro esquema ('ext::', 'ssh://', 'git://', 'file://', etc.)
+       o uso de '::' se rechaza con ValueError antes de tocar subprocesos.
+    3. Defensa en profundidad mediante '--' en git ls-remote y '--end-of-options' en git rev-parse.
     """
     # 1. Validación estricta y fail-closed de source_url
     if not source_url or not isinstance(source_url, str) or source_url.strip().startswith("-"):
@@ -115,7 +118,31 @@ def resolve_git_ref(source_url: str, ref: str = "HEAD") -> str:
             f"source_url inválido: no puede estar vacío ni comenzar con '-' ('{source_url}')."
         )
 
-    # 2. Validación estricta y fail-closed de ref
+    # 2. Allowlist estricta de esquema para source_url (prevención de transporte malicioso como ext::, ssh://, file://)
+    clean_url = source_url.strip()
+    if "::" in clean_url:
+        raise ValueError(
+            f"source_url inválido: transporte o comando no permitido detectado ('{source_url}')."
+        )
+
+    is_https = clean_url.startswith("https://")
+    if not is_https:
+        if "://" in clean_url:
+            raise ValueError(
+                f"source_url con esquema no permitido: '{source_url}'. Solo se permite 'https://' o directorios locales existentes."
+            )
+        try:
+            local_path = Path(clean_url)
+            is_local_dir = local_path.is_dir()
+        except Exception:
+            is_local_dir = False
+
+        if not is_local_dir:
+            raise ValueError(
+                f"source_url no permitido: '{source_url}'. Debe comenzar exactamente con 'https://' o ser un directorio local existente."
+            )
+
+    # 3. Validación estricta y fail-closed de ref
     clean_ref = ref.strip() if isinstance(ref, str) else ""
     if not clean_ref or clean_ref.startswith("-"):
         raise ValueError(

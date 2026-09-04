@@ -713,3 +713,120 @@ def test_dispatcher_adversarial_unregistered_or_unverified_plugin_ignores_cache(
     assert res_ur2["reason"] == "needs_confirmation"
 
 
+def test_sandbox_directory_operations_allowed_with_empty_suffix(tmp_path: Path):
+    """
+    TEST REQUERIDO 3:
+    FIX 2 (a): Operaciones sobre directorios con sufijo vacío permitidas
+    explícitamente cuando allow_directory=True o is_directory=True,
+    sin forzar extensiones de archivo falsas ni permitir escape del sandbox.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    register_authorized_root("workspace", workspace)
+    register_authorized_root("default", workspace)
+
+    try:
+        sub_dir = workspace / "reports_folder"
+        sub_dir.mkdir()
+
+        # 1. Modo directorio explícito permite sufijo vacío
+        assert is_safe_path(sub_dir, sandbox_root=workspace, allow_directory=True) is True
+        assert is_safe_path(sub_dir, sandbox_root=workspace, is_directory=True) is True
+
+        # 2. Rutas aún no creadas en disco pero con intención de ser directorios
+        uncreated_dir = workspace / "future_folder"
+        assert is_safe_path(uncreated_dir, sandbox_root=workspace, allow_directory=True) is True
+
+        # 3. Modo archivo por defecto (allow_directory=False) rechaza sufijo vacío
+        assert is_safe_path(sub_dir, sandbox_root=workspace, allow_directory=False) is False
+        assert is_safe_path(sub_dir, sandbox_root=workspace) is False
+
+        # 4. Directorios sensibles siguen bloqueados incluso con allow_directory=True
+        assert is_safe_path(workspace / ".git", sandbox_root=workspace, allow_directory=True) is False
+        assert is_safe_path(workspace / ".ssh", sandbox_root=workspace, allow_directory=True) is False
+        assert is_safe_path(workspace / "credentials", sandbox_root=workspace, allow_directory=True) is False
+
+        # 5. Escape de sandbox sigue bloqueado en modo directorio
+        assert is_safe_path(tmp_path / "escaped_folder", sandbox_root=workspace, allow_directory=True) is False
+    finally:
+        reset_authorized_roots()
+
+
+def test_sandbox_path_component_matching_no_false_positive(tmp_path: Path):
+    """
+    TEST REQUERIDO 4:
+    FIX 2 (b): Coincidencia de componentes de ruta exactos (Path.parts).
+    Evita falsos positivos por substrings libres en nombres de directorios
+    legítimos como 'digital_art/' (que contiene 'git') o 'mi_credentials_guide/'
+    (que contiene 'credentials').
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    register_authorized_root("workspace", workspace)
+    register_authorized_root("default", workspace)
+
+    try:
+        # 1. Carpeta con substring 'git' (ej. digital_art) no bloquea archivos ni el directorio
+        art_dir = workspace / "digital_art"
+        art_dir.mkdir()
+        art_file = art_dir / "design.png"
+        assert is_safe_path(art_file, sandbox_root=workspace) is True
+        assert is_safe_path(art_dir, sandbox_root=workspace, allow_directory=True) is True
+
+        # 2. Carpeta con substring 'credentials' (ej. mi_credentials_guide) no bloquea archivos ni el directorio
+        guide_dir = workspace / "mi_credentials_guide"
+        guide_dir.mkdir()
+        guide_file = guide_dir / "architecture.md"
+        assert is_safe_path(guide_file, sandbox_root=workspace) is True
+        assert is_safe_path(guide_dir, sandbox_root=workspace, allow_directory=True) is True
+
+        # 3. Carpeta con substring 'ssh' (ej. ssh_guide) no bloquea archivos
+        ssh_notes = workspace / "ssh_guide" / "readme.txt"
+        assert is_safe_path(ssh_notes, sandbox_root=workspace) is True
+
+        # 4. Contraprueba: componentes que coinciden exactamente con directorios sensibles SÍ son bloqueados
+        assert is_safe_path(workspace / ".git" / "config", sandbox_root=workspace) is False
+        assert is_safe_path(workspace / ".ssh" / "id_rsa", sandbox_root=workspace) is False
+        assert is_safe_path(workspace / "credentials" / "data.txt", sandbox_root=workspace) is False
+        assert is_safe_path(workspace / ".config" / "google-chrome" / "Default", sandbox_root=workspace, allow_directory=True) is False
+    finally:
+        reset_authorized_roots()
+
+
+def test_sandbox_still_blocks_original_jarvis_custom_vulnerability(tmp_path: Path):
+    """
+    TEST REQUERIDO 5 (NO REGRESIÓN):
+    Verifica que la vulnerabilidad original de JARVIS_Custom (burlar la protección
+    de credenciales mediante nombres de archivo como credentials.json,
+    credentials_prod.json, my_credentials.txt) SIGA bloqueada fail-closed mediante
+    coincidencia de patrones en el nombre de archivo (filename).
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    register_authorized_root("workspace", workspace)
+    register_authorized_root("default", workspace)
+
+    try:
+        sensitive_files = [
+            "credentials.json",
+            "credentials_prod.json",
+            "my_credentials.json",
+            "my_credentials.txt",
+            "notes_credentials.md",
+            ".env",
+            ".env.production",
+            ".env.local",
+            "id_rsa_backup.py",
+            "id_ed25519_key.txt",
+        ]
+
+        for s_file in sensitive_files:
+            assert is_safe_path(workspace / s_file, sandbox_root=workspace) is False, (
+                f"Fallo de seguridad: '{s_file}' debió ser bloqueado estructuralmente"
+            )
+    finally:
+        reset_authorized_roots()
+
+
+
+
