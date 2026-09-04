@@ -44,13 +44,20 @@ def run_python(
         cmd = [
             bwrap_path,
             "--unshare-net",
+            "--unshare-pid",
+            "--proc", "/proc",
+            "--dev", "/dev",
             "--ro-bind", "/usr", "/usr",
             "--ro-bind-try", "/lib", "/lib",
             "--ro-bind-try", "/lib64", "/lib64",
             "--ro-bind-try", "/bin", "/bin",
-            "--ro-bind-try", "/etc", "/etc",
-            "--proc", "/proc",
-            "--dev", "/dev",
+            "--ro-bind-try", "/etc/localtime", "/etc/localtime",
+            "--ro-bind-try", "/etc/ld.so.cache", "/etc/ld.so.cache",
+            "--ro-bind-try", "/etc/ld.so.conf", "/etc/ld.so.conf",
+            "--ro-bind-try", "/etc/ld.so.conf.d", "/etc/ld.so.conf.d",
+            "--ro-bind-try", "/etc/ssl", "/etc/ssl",
+            "--ro-bind-try", "/etc/ca-certificates", "/etc/ca-certificates",
+            "--ro-bind-try", "/etc/resolv.conf", "/etc/resolv.conf",
             "--ro-bind", str(venv_root), str(venv_root),
             "--ro-bind-try", str(base_prefix), str(base_prefix),
             "--bind", str(workspace_root), str(workspace_root),
@@ -222,41 +229,63 @@ def search_local_files(
 ) -> Dict[str, Any]:
     """
     Busca archivos dentro del sandbox acotado al root autorizado.
-    Si el llamador intenta escapar mediante '..' en subfolder o en el patrón,
-    la búsqueda permanece estrictamente confinada a sandbox_root.
+    Valida confinamiento mediante resolución de ruta (Path.resolve() e is_relative_to()),
+    eliminando antipatrones de reemplazo de string (.replace('../', '')).
     """
     root = resolve_sandbox_root().resolve()
     target_dir = root
 
     if subfolder:
         candidate = (root / subfolder).resolve()
-        try:
-            candidate.relative_to(root)
-            if candidate.is_dir():
-                target_dir = candidate
-        except ValueError:
+        if not candidate.is_relative_to(root):
             target_dir = root
+        elif candidate.is_dir():
+            target_dir = candidate
 
-    clean_pattern = pattern.replace("../", "").replace("..\\", "")
-    if not clean_pattern:
-        clean_pattern = "*"
+    pattern_str = pattern.strip() if isinstance(pattern, str) else "*"
+    if not pattern_str:
+        pattern_str = "*"
 
+    # Validación estricta por resolución de ruta de patrones que contengan rutas o intentos de traversal
+    if "/" in pattern_str or "\\" in pattern_str or ".." in pattern_str:
+        pattern_p = Path(pattern_str)
+        has_wildcards = any(c in pattern_str for c in ["*", "?", "["])
+        eval_path = pattern_p.parent if has_wildcards else pattern_p
+        candidate_pattern = (target_dir / eval_path).resolve()
+        if not candidate_pattern.is_relative_to(root) or ".." in pattern_str:
+            raise PermissionError(
+                f"Búsqueda rechazada por el sandbox: el patrón '{pattern}' escapa o navega fuera de la raíz autorizada."
+            )
+
+    clean_pattern = pattern_str
     matches: List[str] = []
     # Buscar de forma recursiva si clean_pattern es '*' o incluye subdirectorios
-    finder = target_dir.rglob(clean_pattern) if clean_pattern == "*" or "**" in clean_pattern else target_dir.glob(clean_pattern)
+    try:
+        finder = (
+            target_dir.rglob(clean_pattern)
+            if clean_pattern == "*" or "**" in clean_pattern
+            else target_dir.glob(clean_pattern)
+        )
+    except Exception:
+        finder = []
 
     for item in finder:
-        if item.is_file():
-            if is_safe_path(item, sandbox_root=root):
+        resolved_item = item.resolve()
+        # Verificación estricta de confinamiento por resolución de ruta
+        if not resolved_item.is_relative_to(root):
+            continue
+
+        if resolved_item.is_file():
+            if is_safe_path(resolved_item, sandbox_root=root):
                 try:
-                    rel = item.relative_to(root)
+                    rel = resolved_item.relative_to(root)
                     matches.append(str(rel))
                 except ValueError:
                     pass
-        elif item.is_dir():
-            if is_safe_path(item / "probe.txt", sandbox_root=root):
+        elif resolved_item.is_dir():
+            if is_safe_path(resolved_item, sandbox_root=root, allow_directory=True):
                 try:
-                    rel = item.relative_to(root)
+                    rel = resolved_item.relative_to(root)
                     matches.append(str(rel))
                 except ValueError:
                     pass

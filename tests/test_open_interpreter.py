@@ -334,3 +334,126 @@ def test_oi_08_run_python_fail_closed_without_bwrap(isolated_env, monkeypatch):
     assert "Aislamiento de red no disponible" in res["error"]
     assert "fail-closed" in res["error"]
 
+
+# ============================================================================
+# TESTS ADVERSARIALES REQUERIDOS (FIX 1 y FIX 2)
+# ============================================================================
+
+def test_search_local_files_adversarial_double_dot_bypass_rejected(isolated_env):
+    """
+    TEST ADVERSARIAL REQUERIDO 1:
+    Verifica que patrones como '....//', '....//....//', '../' y variantes que burlaban
+    la sanitización simple (.replace('../', '')) sean rechazados de raíz por la nueva
+    validación por resolución de rutas (Path.resolve() e is_relative_to()).
+    Garantiza que ningún archivo fuera del sandbox_root (ej. señuelo en directorio padre)
+    sea expuesto o retornado en 'matches'.
+    """
+    dispatcher: Dispatcher = isolated_env["dispatcher"]
+    sandbox: Path = isolated_env["sandbox"]
+
+    # 1. Crear archivo señuelo sensible fuera del sandbox (en el directorio padre)
+    outside_file = sandbox.parent / "leak_secret.txt"
+    outside_file.write_text("SUPER_SECRET_LEAK=9999", encoding="utf-8")
+
+    # Crear archivo legítimo dentro del sandbox
+    (sandbox / "legitimate.txt").write_text("Contenido legítimo", encoding="utf-8")
+
+    # Batería de patrones diseñados para escapar mediante secuencias de doble punto
+    bypass_patterns = [
+        "....//",
+        "....//....//",
+        "....//*",
+        "....//....//*",
+        "....//leak_secret.txt",
+        "..../....//leak_secret.txt",
+        "../",
+        "../../",
+        "../*",
+        "../../leak_secret.txt",
+    ]
+
+    for bad_pattern in bypass_patterns:
+        res = dispatcher.invoke(
+            "open_interpreter.search_local_files",
+            params={"pattern": bad_pattern},
+            user_confirmed=True,
+        )
+        # La invocación debe ser rechazada con execution_error por PermissionError
+        assert res["ok"] is False, f"El patrón adversarial '{bad_pattern}' debió ser rechazado"
+        assert res["reason"] == "execution_error"
+        assert "Búsqueda rechazada por el sandbox" in res["error"] or "PermissionError" in res["error"]
+
+    # Caso de control: búsqueda legítima con patrón normal funciona y confina
+    control_res = dispatcher.invoke(
+        "open_interpreter.search_local_files",
+        params={"pattern": "*.txt"},
+        user_confirmed=True,
+    )
+    assert control_res["ok"] is True
+    matches = control_res["result"]["matches"]
+    assert "legitimate.txt" in matches
+    assert not any("leak_secret" in m for m in matches)
+
+
+def test_run_python_bwrap_reduced_surface_isolates_etc_and_proc(isolated_env):
+    """
+    TEST ADVERSARIAL REQUERIDO 2:
+    Verifica la reducción de superficie en Bubblewrap (bwrap):
+    1. /etc ya no se expone completo: lectura de /etc/passwd falla con FileNotFoundError.
+    2. /proc está aislado en un namespace de PID privado (--unshare-pid): los cientos de PIDs
+       del host no son visibles; únicamente se observan los procesos internos del sandbox.
+    3. Código Python estándar (math, datetime, json, etc.) sigue ejecutándose sin problemas.
+    """
+    dispatcher: Dispatcher = isolated_env["dispatcher"]
+
+    # 1. Probar que /etc/passwd no es accesible
+    etc_code = """
+try:
+    with open('/etc/passwd', 'r') as f:
+        print('LEAKED:' + f.read()[:50])
+except FileNotFoundError:
+    print('PROTECTED_ETC_PASSWD_NOT_FOUND')
+"""
+    res_etc = dispatcher.invoke(
+        "open_interpreter.run_python",
+        params={"code": etc_code},
+        user_confirmed=True,
+    )
+    assert res_etc["ok"] is True
+    assert "PROTECTED_ETC_PASSWD_NOT_FOUND" in res_etc["result"]["stdout"]
+    assert "LEAKED" not in res_etc["result"]["stdout"]
+
+    # 2. Probar que el namespace de PID está aislado (no ve los cientos de procesos del host)
+    proc_code = """
+import os
+pids = [p for p in os.listdir('/proc') if p.isdigit()]
+print(f'VISIBLE_PIDS_COUNT:{len(pids)}')
+"""
+    res_proc = dispatcher.invoke(
+        "open_interpreter.run_python",
+        params={"code": proc_code},
+        user_confirmed=True,
+    )
+    assert res_proc["ok"] is True
+    stdout_proc = res_proc["result"]["stdout"]
+    assert "VISIBLE_PIDS_COUNT:" in stdout_proc
+    count_str = stdout_proc.split("VISIBLE_PIDS_COUNT:")[1].strip()
+    visible_count = int(count_str)
+    assert visible_count <= 5, f"Esperado <= 5 PIDs en namespace aislado, se encontraron {visible_count}"
+
+    # 3. Probar que código Python estándar funciona normalmente
+    std_code = """
+import math, json, datetime
+data = {"pi": math.pi, "timestamp": datetime.datetime.now().isoformat()}
+print("COMPUTED:" + json.dumps(data))
+"""
+    res_std = dispatcher.invoke(
+        "open_interpreter.run_python",
+        params={"code": std_code},
+        user_confirmed=True,
+    )
+    assert res_std["ok"] is True
+    assert res_std["result"]["ok"] is True
+    assert "COMPUTED:" in res_std["result"]["stdout"]
+
+
