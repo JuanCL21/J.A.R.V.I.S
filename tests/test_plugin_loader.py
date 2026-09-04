@@ -417,3 +417,169 @@ def test_nuc_06_two_plugins_same_action_name_no_collision(
 
     assert "sensor_a.get_status" in loader.registered_actions
     assert "sensor_b.get_status" in loader.registered_actions
+
+
+# ============================================================================
+# TESTS ADVERSARIALES: Aislamiento de confirmaciones y no-reintento de TypeError
+# ============================================================================
+def test_dispatcher_adversarial_confirmation_not_shared_across_plugins(
+    loader: PluginLoader, temp_audit_logger: AuditLogger
+):
+    """
+    Test adversarial 1: Confirmar una capacidad para plugin_id='plugin_a' NO debe autorizar
+    en silencio la misma capacidad para plugin_id='plugin_b' en la misma sesión.
+    Si la caché no incluye plugin_id, este test falla.
+    """
+    manifest_a = {
+        "schema_version": "1",
+        "id": "plugin_a",
+        "name": "Plugin A",
+        "version": "1.0.0",
+        "capabilities": ["filesystem_write"],
+        "actions": [
+            {
+                "name": "write_data",
+                "capability": "filesystem_write",
+                "description": "Escribe datos A",
+            }
+        ],
+    }
+    manifest_b = {
+        "schema_version": "1",
+        "id": "plugin_b",
+        "name": "Plugin B",
+        "version": "1.0.0",
+        "capabilities": ["filesystem_write"],
+        "actions": [
+            {
+                "name": "write_data",
+                "capability": "filesystem_write",
+                "description": "Escribe datos B",
+            }
+        ],
+    }
+
+    loader.register_programmatic_plugin(
+        manifest_a, handlers={"write_data": lambda **kw: "written_a"}
+    )
+    loader.register_programmatic_plugin(
+        manifest_b, handlers={"write_data": lambda **kw: "written_b"}
+    )
+
+    dispatcher = Dispatcher(
+        plugin_loader=loader,
+        version_profile="core_full",
+        audit_logger=temp_audit_logger,
+    )
+
+    # 1. Confirmar capacidad para plugin_a en la sesión
+    res_a1 = dispatcher.invoke(
+        "plugin_a.write_data",
+        params={"content": "hello_a"},
+        user_confirmed=True,
+        session_id="session_alpha",
+    )
+    assert res_a1["ok"] is True
+    assert res_a1["result"] == "written_a"
+
+    # 2. Invocación subsecuente para plugin_a en la misma sesión -> permitida por caché
+    res_a2 = dispatcher.invoke(
+        "plugin_a.write_data",
+        params={"content": "hello_a2"},
+        user_confirmed=False,
+        session_id="session_alpha",
+    )
+    assert res_a2["ok"] is True
+    assert res_a2["result"] == "written_a"
+
+    # 3. Invocar la MISMA capacidad desde plugin_b en la MISMA sesión sin user_confirmed
+    # DEBE exigir confirmación de nuevo (rechazada con needs_confirmation)
+    res_b = dispatcher.invoke(
+        "plugin_b.write_data",
+        params={"content": "malicious_payload_b"},
+        user_confirmed=False,
+        session_id="session_alpha",
+    )
+    assert res_b["ok"] is False
+    assert res_b["reason"] == "needs_confirmation"
+    assert res_b["capability"] == "filesystem_write"
+
+    # 4. Probar reseteo específico de sesión sin afectar otras sesiones
+    res_a_beta = dispatcher.invoke(
+        "plugin_a.write_data",
+        params={"content": "hello_beta"},
+        user_confirmed=True,
+        session_id="session_beta",
+    )
+    assert res_a_beta["ok"] is True
+
+    # Resetear solo session_alpha
+    dispatcher.reset_session_confirmations(session_id="session_alpha")
+    # session_alpha vuelve a exigir confirmación
+    res_a_alpha_after = dispatcher.invoke(
+        "plugin_a.write_data",
+        params={"content": "hello_alpha3"},
+        user_confirmed=False,
+        session_id="session_alpha",
+    )
+    assert res_a_alpha_after["ok"] is False
+    assert res_a_alpha_after["reason"] == "needs_confirmation"
+
+    # session_beta permanece cacheada
+    res_a_beta_after = dispatcher.invoke(
+        "plugin_a.write_data",
+        params={"content": "hello_beta2"},
+        user_confirmed=False,
+        session_id="session_beta",
+    )
+    assert res_a_beta_after["ok"] is True
+
+
+def test_dispatcher_adversarial_handler_typeerror_executes_only_once(
+    loader: PluginLoader, temp_audit_logger: AuditLogger
+):
+    """
+    Test adversarial 2: Un handler que cuenta cuántas veces fue invocado y lanza
+    TypeError intencionalmente en su lógica interna (no por firma incorrecta)
+    debe ejecutarse EXACTAMENTE 1 vez, nunca 2 veces.
+    """
+    manifest = {
+        "schema_version": "1",
+        "id": "buggy_plugin",
+        "name": "Buggy Plugin",
+        "version": "1.0.0",
+        "capabilities": ["system_info"],
+        "actions": [
+            {
+                "name": "faulty_action",
+                "capability": "system_info",
+                "description": "Lanza TypeError interno",
+            }
+        ],
+    }
+
+    call_count = 0
+
+    def faulty_handler(val: str = "default"):
+        nonlocal call_count
+        call_count += 1
+        # Simular TypeError interno dentro de la lógica del plugin (ej. suma inválida)
+        return "prefix_" + 12345  # type: ignore
+
+    loader.register_programmatic_plugin(
+        manifest, handlers={"faulty_action": faulty_handler}
+    )
+
+    dispatcher = Dispatcher(
+        plugin_loader=loader,
+        version_profile="core_full",
+        audit_logger=temp_audit_logger,
+    )
+
+    res = dispatcher.invoke("buggy_plugin.faulty_action", params={"val": "test"})
+
+    assert res["ok"] is False
+    assert res["reason"] == "execution_error"
+    assert "TypeError" in res.get("error", "") or "concatenate" in res.get("error", "")
+    assert call_count == 1, f"El handler se ejecutó {call_count} veces (debe ser exactamente 1)"
+

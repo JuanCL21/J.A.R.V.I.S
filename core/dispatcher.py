@@ -9,12 +9,16 @@ Revisión de auditor:
 - Formato de respuesta estructurado: {"ok": bool, "reason": str, ...}.
 """
 
-from typing import Any, Callable, Dict, Optional, Set
+import inspect
+from typing import Any, Callable, Dict, Optional, Set, Tuple
 
 from .audit_log import AuditLogger, default_audit_logger
 from .capability_catalog import capability_requires_confirmation
 from .plugin_loader import ActionDefinition, PluginLoader
 from .version_profiles import is_capability_allowed
+
+# Centinela para detectar si session_id fue provisto explícitamente en reset_session_confirmations
+_NO_SESSION_PROVIDED = object()
 
 
 class Dispatcher:
@@ -30,12 +34,24 @@ class Dispatcher:
         self.audit_logger = audit_logger or default_audit_logger
         self.rate_limit_hook = rate_limit_hook
 
-        # Caché de confirmaciones de usuario por sesión de proceso en memoria (Revisión de auditor #6)
-        self.session_confirmed_capabilities: Set[str] = set()
+        # Caché de confirmaciones de usuario por (plugin_id, capability, session_id)
+        # Si session_id es None, se trata como clave estable e identificada para el proceso.
+        self.session_confirmed_capabilities: Set[Tuple[str, str, Optional[str]]] = set()
 
-    def reset_session_confirmations(self) -> None:
-        """Reinicia la caché de confirmaciones de sesión (útil en reinicios o pruebas)."""
-        self.session_confirmed_capabilities.clear()
+    def reset_session_confirmations(self, session_id: Any = _NO_SESSION_PROVIDED) -> None:
+        """
+        Reinicia la caché de confirmaciones de sesión.
+        Si se especifica session_id, limpia únicamente las confirmaciones asociadas a esa sesión.
+        Si session_id no fue provisto, limpia todo el estado global de confirmaciones.
+        """
+        if session_id is _NO_SESSION_PROVIDED:
+            self.session_confirmed_capabilities.clear()
+        else:
+            self.session_confirmed_capabilities = {
+                entry
+                for entry in self.session_confirmed_capabilities
+                if entry[2] != session_id
+            }
 
     def set_rate_limit_hook(self, hook: Optional[Callable[[str, str], bool]]) -> None:
         """Configura el hook de rate limiting (Revisión de auditor #4)."""
@@ -71,7 +87,7 @@ class Dispatcher:
                     allowed=False,
                     result_status="denied",
                     reason="rate_limit_exceeded",
-                    details={"params": params},
+                    details={"params": params, "session_id": session_id},
                 )
                 return {
                     "ok": False,
@@ -92,7 +108,7 @@ class Dispatcher:
                 allowed=False,
                 result_status="denied",
                 reason="action_not_declared",
-                details={"params": params},
+                details={"params": params, "session_id": session_id},
             )
             return {
                 "ok": False,
@@ -111,7 +127,7 @@ class Dispatcher:
                 allowed=False,
                 result_status="denied",
                 reason="capability_denied",
-                details={"profile": self.version_profile, "params": params},
+                details={"profile": self.version_profile, "params": params, "session_id": session_id},
             )
             return {
                 "ok": False,
@@ -121,12 +137,13 @@ class Dispatcher:
             }
 
         # 5. Comprobar si requiere confirmación del usuario (Auditor #6, NUC-03)
+        # La clave de caché aísla estrictamente (plugin_id, capability, session_id)
         if capability_requires_confirmation(capability):
-            # ¿Ya fue confirmada en esta sesión de proceso?
-            if capability not in self.session_confirmed_capabilities:
+            confirmation_key = (plugin_id, capability, session_id)
+            if confirmation_key not in self.session_confirmed_capabilities:
                 if user_confirmed:
                     # El usuario confirma en esta llamada: cachear para el resto de la sesión
-                    self.session_confirmed_capabilities.add(capability)
+                    self.session_confirmed_capabilities.add(confirmation_key)
                 else:
                     self.audit_logger.log_invocation(
                         plugin_id=plugin_id,
@@ -135,7 +152,7 @@ class Dispatcher:
                         allowed=False,
                         result_status="needs_confirmation",
                         reason="needs_confirmation",
-                        details={"params": params},
+                        details={"params": params, "session_id": session_id},
                     )
                     return {
                         "ok": False,
@@ -154,7 +171,7 @@ class Dispatcher:
                 allowed=True,
                 result_status="success",
                 reason="no_handler_defined",
-                details={"params": params},
+                details={"params": params, "session_id": session_id},
             )
             return {
                 "ok": True,
@@ -162,13 +179,41 @@ class Dispatcher:
                 "action": action_full_name,
             }
 
+        # Inspección previa de la firma para decidir handler(**params) vs handler(params)
+        # sin ejecutar jamás el handler dos veces ante un TypeError en tiempo de ejecución.
+        call_mode = "kwargs"
         try:
-            # Invocar handler
-            try:
-                # Intentar pasar como kwargs o como único argumento params
-                result = handler(**params)
-            except TypeError:
+            sig = inspect.signature(handler)
+            if len(sig.parameters) == 0:
+                call_mode = "kwargs"
+            else:
+                try:
+                    sig.bind(**params)
+                    call_mode = "kwargs"
+                except TypeError:
+                    if len(sig.parameters) == 1:
+                        param = next(iter(sig.parameters.values()))
+                        if param.kind in (
+                            inspect.Parameter.POSITIONAL_ONLY,
+                            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        ):
+                            try:
+                                sig.bind(params)
+                                call_mode = "single"
+                            except TypeError:
+                                call_mode = "kwargs"
+                        else:
+                            call_mode = "kwargs"
+                    else:
+                        call_mode = "kwargs"
+        except (ValueError, TypeError):
+            call_mode = "kwargs"
+
+        try:
+            if call_mode == "single":
                 result = handler(params)
+            else:
+                result = handler(**params)
 
             # 7. Registro de auditoría exitoso (NUC-05)
             self.audit_logger.log_invocation(
@@ -177,7 +222,7 @@ class Dispatcher:
                 capability=capability,
                 allowed=True,
                 result_status="success",
-                details={"params": params},
+                details={"params": params, "session_id": session_id},
             )
             return {
                 "ok": True,
@@ -194,7 +239,7 @@ class Dispatcher:
                 allowed=True,
                 result_status="error",
                 reason="execution_error",
-                details={"error": str(e), "params": params},
+                details={"error": str(e), "params": params, "session_id": session_id},
             )
             return {
                 "ok": False,
