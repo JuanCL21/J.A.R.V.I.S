@@ -1,0 +1,687 @@
+<!DOCTYPE html><html class="dark" lang="es"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>JARVIS - Módulos y Plugins Locales</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface-container": "#131926",
+            "surface-container-high": "#1a2233",
+            "surface-container-highest": "#212c40",
+            "background": "#070a0f",
+            "surface": "#0b0f17",
+            "primary": "#38bdf8",
+            "primary-container": "#0369a1",
+            "on-surface": "#e2e8f0",
+            "on-surface-variant": "#94a3b8",
+            "outline": "#334155",
+            "outline-variant": "rgba(255, 255, 255, 0.07)",
+            "secondary": "#2dd4bf",
+            "success": "#34d399",
+            "error": "#f87171"
+          },
+          fontFamily: {
+            sans: ['Open Sans', 'Segoe UI', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    body {
+      background-color: #070a0f;
+      color: #e2e8f0;
+      font-family: 'Open Sans', sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 5px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 9999px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb:hover {
+      background: #334155;
+    }
+    .glass-card {
+      background: #0f1522;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      transition: all 0.2s ease-in-out;
+    }
+    .glass-card:hover {
+      border-color: rgba(56, 189, 248, 0.25);
+      box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.5), 0 0 12px -2px rgba(56, 189, 248, 0.05);
+      transform: translateY(-1.5px);
+    }
+  </style>
+</head>
+<body class="h-screen w-screen flex flex-col antialiased bg-[#070a0f] text-[#e2e8f0]">
+<!-- TOP HEADER / STATUS BAR (Global Minimalist Shell) -->
+
+<!-- MAIN WRAPPER (Rail Nav + Body) -->
+<div class="flex-1 flex overflow-hidden">
+<!-- LEFT ICON NAVIGATION RAIL (64px wide obsidian shell matching SCREEN_6 / SCREEN_7) -->
+<aside class="w-16 border-r border-[#182030] bg-[#070a0f] flex flex-col items-center justify-between py-4 flex-shrink-0 z-10">
+<div class="flex flex-col items-center gap-4 w-full">
+<!-- Brand Glyph -->
+
+<!-- Main Nav Items -->
+<nav class="flex flex-col items-center gap-2 w-full px-2.5">
+<!-- 1. Asistente (Sparkle / Orb) -->
+<a class="relative flex items-center justify-center w-10 h-10 rounded-lg text-[#64748b] hover:text-[#e2e8f0] hover:bg-[#0f1726] transition-colors group" href="#" title="Asistente">
+<span class="material-symbols-outlined text-[20px]">auto_awesome</span>
+<span class="absolute left-14 bg-[#0e1624] border border-[#1e293b] text-[#e2e8f0] text-[11px] px-2.5 py-1 rounded shadow-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">Asistente</span>
+</a>
+<!-- 2. Chat (Burbuja) -->
+<a class="relative flex items-center justify-center w-10 h-10 rounded-lg text-[#64748b] hover:text-[#e2e8f0] hover:bg-[#0f1726] transition-colors group" href="#" title="Chat Operativo">
+<span class="material-symbols-outlined text-[20px]">chat</span>
+<span class="absolute left-14 bg-[#0e1624] border border-[#1e293b] text-[#e2e8f0] text-[11px] px-2.5 py-1 rounded shadow-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">Chat</span>
+</a>
+<!-- 3. Plugins (ACTIVE) - Bloques/puzzle cian sutil -->
+<a class="relative flex items-center justify-center w-10 h-10 rounded-lg bg-[#38bdf8]/10 text-[#38bdf8] border border-[#38bdf8]/35 shadow-[0_0_12px_rgba(56,189,248,0.18)] transition-all" href="#" title="Módulos y Plugins">
+<span class="material-symbols-outlined text-[20px]">extension</span>
+<span class="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-[#38bdf8] rounded-r-full"></span>
+<span class="absolute left-14 bg-[#0e1624] border border-[#1e293b] text-[#e2e8f0] text-[11px] px-2.5 py-1 rounded shadow-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">Plugins</span>
+</a>
+<!-- 4. Configuración (Sliders/Gear) -->
+<a class="relative flex items-center justify-center w-10 h-10 rounded-lg text-[#64748b] hover:text-[#e2e8f0] hover:bg-[#0f1726] transition-colors group" href="#" title="Configuración del Sistema">
+<span class="material-symbols-outlined text-[20px]">tune</span>
+<span class="absolute left-14 bg-[#0e1624] border border-[#1e293b] text-[#e2e8f0] text-[11px] px-2.5 py-1 rounded shadow-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">Configuración</span>
+</a>
+</nav>
+</div>
+<!-- Bottom System Indicators -->
+<div class="flex flex-col items-center gap-3">
+<button class="w-8 h-8 rounded-lg bg-[#0b121d] border border-[#182335] text-[#2dd4bf] hover:border-[#2dd4bf]/40 flex items-center justify-center transition-colors" title="Enclave Seguro Confinado (100% Offline)">
+<span class="material-symbols-outlined text-[16px]">lock</span>
+</button>
+<button class="w-8 h-8 rounded-full bg-[#101928] border border-[#1a2638] text-[#64748b] hover:text-[#e2e8f0] hover:border-[#38bdf8]/40 flex items-center justify-center transition-colors" title="Operador Local">
+<span class="material-symbols-outlined text-[16px]">account_circle</span>
+</button>
+</div>
+</aside>
+<!-- CONTENT AREA -->
+<main class="flex-1 flex flex-col bg-[#070a0f] overflow-hidden">
+<!-- SUB-HEADER / REFINED BAR (Title + Search + Filter Pills) -->
+<section class="px-8 pt-6 pb-4 border-b border-[#151c2a] bg-[#090d14]/70 flex flex-col gap-4">
+<!-- Upper Row: Header Title & Security Chip -->
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="w-1.5 h-1.5 rounded-full bg-[#38bdf8]"></span>
+<span class="text-[11px] font-mono tracking-wider text-[#38bdf8] uppercase">Ecosistema Extensible</span>
+</div>
+<h1 class="text-xl font-semibold tracking-tight text-[#f1f5f9]">
+              Módulos y Plugins Locales
+            </h1>
+<p class="text-xs text-[#94a3b8] mt-0.5">
+              Ampliá las capacidades de JARVIS con ejecución segura en sandbox sin telemetría externa.
+            </p>
+</div>
+<!-- Security Enclave Chip -->
+<div class="flex items-center gap-2 self-start md:self-auto">
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#0e1726] border border-[#1e293b] text-[11px] font-mono text-[#94a3b8]">
+<span class="material-symbols-outlined text-[15px] text-[#34d399]">verified_user</span>
+<span class="text-[#cbd5e1]">Zero Exfiltration</span>
+<span class="text-[#334155]">•</span>
+<span class="text-[#64748b]">Aislamiento POSIX</span>
+</div>
+</div>
+</div>
+<!-- Lower Row: Filters & Quick Search -->
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+<!-- Category Filter Pills -->
+<div class="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0" id="filterTabs">
+<button class="filter-pill active px-3 py-1 rounded-md text-xs font-medium bg-[#1e293b] text-[#f8fafc] border border-[#334155] transition-colors" onclick="filterPlugins('all', this)">
+              Todos <span class="font-mono text-[11px] opacity-75 ml-1" id="badge-all">9</span>
+</button>
+<button class="filter-pill px-3 py-1 rounded-md text-xs font-medium text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#131b2a] border border-transparent transition-colors" onclick="filterPlugins('installed', this)">
+              Instalados <span class="font-mono text-[11px] opacity-75 ml-1 text-[#34d399]" id="badge-installed">4</span>
+</button>
+<button class="filter-pill px-3 py-1 rounded-md text-xs font-medium text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#131b2a] border border-transparent transition-colors" onclick="filterPlugins('available', this)">
+              Disponibles <span class="font-mono text-[11px] opacity-75 ml-1 text-[#38bdf8]" id="badge-avail">5</span>
+</button>
+<button class="filter-pill px-3 py-1 rounded-md text-xs font-medium text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#131b2a] border border-transparent transition-colors" onclick="filterPlugins('system', this)">
+              Sistema / Core
+            </button>
+</div>
+<!-- Controls: Quick Search + Empty toggle -->
+<div class="flex items-center gap-2.5">
+<div class="relative w-56 sm:w-64">
+<span class="material-symbols-outlined text-[16px] text-[#64748b] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">search</span>
+<input class="w-full pl-8 pr-12 py-1.5 text-xs bg-[#0c121d] border border-[#1e293b] rounded-lg text-[#e2e8f0] placeholder-[#64748b] focus:outline-none focus:border-[#38bdf8]/50 focus:ring-1 focus:ring-[#38bdf8]/20 transition-all font-sans" id="pluginSearchInput" oninput="handleSearch(this.value)" placeholder="Buscar plugins..." type="text">
+<kbd class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#131b2b] text-[#64748b] border border-[#1e293b]">Ctrl K</kbd>
+</div>
+<!-- Empty state toggle for inspection -->
+<button class="px-2.5 py-1.5 text-[11px] font-mono rounded-lg bg-[#0c121d] border border-[#1e293b] text-[#64748b] hover:text-[#38bdf8] hover:border-[#38bdf8]/40 transition-colors whitespace-nowrap" id="toggleEmptyBtn" onclick="toggleEmptyState()" title="Ver estado sin plugins">
+              [Estado vacío]
+            </button>
+</div>
+</div>
+</section>
+<!-- PLUGIN GRID CONTAINER (Scrollable) -->
+<div class="flex-1 overflow-y-auto px-8 py-6 custom-scroll" id="catalogContent">
+<!-- 3-COLUMN REFINED GRID -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-7xl" id="pluginGrid">
+<!-- CARD 1: Reloj & Cronómetros (Available) -->
+<div class="glass-card rounded-xl p-5 flex flex-col justify-between" data-category="utilidad" data-name="Reloj y Cronómetros" data-status="available" id="card-clock">
+<div>
+<!-- Top Row: Icon + Badges -->
+<div class="flex items-start justify-between mb-3.5">
+<div class="w-9 h-9 rounded-lg bg-[#142238] border border-[#1e3456] flex items-center justify-center text-[#38bdf8]">
+<span class="material-symbols-outlined text-[20px]">schedule</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="text-[10px] font-mono text-[#64748b] bg-[#0c121d] px-2 py-0.5 rounded border border-[#182335]">Utilidad</span>
+<span class="text-[10px] font-mono text-[#94a3b8] bg-[#0f1726] px-1.5 py-0.5 rounded border border-[#1e293b]">Listo</span>
+</div>
+</div>
+<!-- Title & Body -->
+<h3 class="text-[14px] font-semibold text-[#f1f5f9] tracking-tight mb-1.5">Reloj y Cronómetros</h3>
+<p class="text-xs text-[#94a3b8] leading-relaxed mb-4">
+                Consultá la hora del sistema, programá alarmas de voz y configurá temporizadores de enfoque continuo.
+              </p>
+<!-- Technical metadata strip -->
+<div class="flex items-center gap-3 pt-3 border-t border-[#162030] text-[10px] font-mono text-[#64748b] mb-4">
+<span class="">v1.2.0</span>
+<span class="">•</span>
+<span class="">Sandbox 6 MB</span>
+<span class="">•</span>
+<span class="text-[#2dd4bf]">Local</span>
+</div>
+</div>
+<!-- Action Area -->
+<div>
+<button class="w-full py-2 px-3 rounded-lg text-xs font-medium border border-[#38bdf8]/40 bg-[#38bdf8]/10 text-[#38bdf8] hover:bg-[#38bdf8] hover:text-[#070a0f] hover:font-semibold transition-all flex items-center justify-center gap-1.5" onclick="handleInstall('card-clock', 'Reloj y Cronómetros')">
+<span class="material-symbols-outlined text-[15px]">add</span>
+<span class="">Instalar módulo</span>
+</button>
+<div class="status-msg min-h-[16px] mt-1 text-[11px] font-mono text-center"></div>
+</div>
+</div>
+<!-- CARD 2: Ejecutor Python Seguro (Installed / Active) -->
+<div class="glass-card rounded-xl p-5 flex flex-col justify-between" data-category="system" data-name="Ejecutor Python Seguro" data-status="installed" id="card-python">
+<div>
+<div class="flex items-start justify-between mb-3.5">
+<div class="w-9 h-9 rounded-lg bg-[#0d2822] border border-[#164e40] flex items-center justify-center text-[#34d399]">
+<span class="material-symbols-outlined text-[20px]">code</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="text-[10px] font-mono text-[#64748b] bg-[#0c121d] px-2 py-0.5 rounded border border-[#182335]">Entorno Seguro</span>
+<span class="text-[10px] font-mono text-[#34d399] bg-[#34d399]/10 px-2 py-0.5 rounded border border-[#34d399]/30">Activo</span>
+</div>
+</div>
+<h3 class="text-[14px] font-semibold text-[#f1f5f9] tracking-tight mb-1.5">Ejecutor Python Seguro</h3>
+<p class="text-xs text-[#94a3b8] leading-relaxed mb-4">
+                Procesá cálculos matemáticos, manipulación de datos tabulares y scripts en un entorno aislado protegido.
+              </p>
+<div class="flex items-center gap-3 pt-3 border-t border-[#162030] text-[10px] font-mono text-[#64748b] mb-4">
+<span class="">v3.11-posix</span>
+<span class="">•</span>
+<span class="">Sandbox 38 MB</span>
+<span class="">•</span>
+<span class="text-[#34d399]">Sin red</span>
+</div>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<button class="flex-1 py-2 px-3 rounded-lg text-xs font-medium border border-[#34d399]/30 bg-[#34d399]/10 text-[#34d399] flex items-center justify-center gap-1.5 cursor-default" disabled="">
+<span class="material-symbols-outlined text-[15px]">check_circle</span>
+<span class="">Instalado</span>
+</button>
+<button class="p-2 rounded-lg bg-[#0f1726] border border-[#1e293b] text-[#94a3b8] hover:text-[#e2e8f0] hover:border-[#38bdf8]/40 transition-colors" title="Ajustes de sandbox">
+<span class="material-symbols-outlined text-[16px]">settings</span>
+</button>
+</div>
+<div class="status-msg min-h-[16px] mt-1 text-[11px] font-mono text-[#34d399]/80 text-center">Listo para usar</div>
+</div>
+</div>
+<!-- CARD 3: Generador de Gráficos (Available) -->
+<div class="glass-card rounded-xl p-5 flex flex-col justify-between" data-category="visualizacion" data-name="Generador de Gráficos" data-status="available" id="card-charts">
+<div>
+<div class="flex items-start justify-between mb-3.5">
+<div class="w-9 h-9 rounded-lg bg-[#142238] border border-[#1e3456] flex items-center justify-center text-[#38bdf8]">
+<span class="material-symbols-outlined text-[20px]">bar_chart</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="text-[10px] font-mono text-[#64748b] bg-[#0c121d] px-2 py-0.5 rounded border border-[#182335]">Visualización</span>
+<span class="text-[10px] font-mono text-[#94a3b8] bg-[#0f1726] px-1.5 py-0.5 rounded border border-[#1e293b]">Listo</span>
+</div>
+</div>
+<h3 class="text-[14px] font-semibold text-[#f1f5f9] tracking-tight mb-1.5">Generador de Gráficos</h3>
+<p class="text-xs text-[#94a3b8] leading-relaxed mb-4">
+                Creá gráficos de líneas, barras y dispersión en imágenes PNG directamente a partir de tus archivos CSV locales.
+              </p>
+<div class="flex items-center gap-3 pt-3 border-t border-[#162030] text-[10px] font-mono text-[#64748b] mb-4">
+<span class="">v2.0.4</span>
+<span class="">•</span>
+<span class="">Sandbox 18 MB</span>
+<span class="">•</span>
+<span class="text-[#2dd4bf]">Local</span>
+</div>
+</div>
+<div>
+<button class="w-full py-2 px-3 rounded-lg text-xs font-medium border border-[#38bdf8]/40 bg-[#38bdf8]/10 text-[#38bdf8] hover:bg-[#38bdf8] hover:text-[#070a0f] hover:font-semibold transition-all flex items-center justify-center gap-1.5" onclick="handleInstall('card-charts', 'Generador de Gráficos')">
+<span class="material-symbols-outlined text-[15px]">add</span>
+<span class="">Instalar módulo</span>
+</button>
+<div class="status-msg min-h-[16px] mt-1 text-[11px] font-mono text-center"></div>
+</div>
+</div>
+<!-- CARD 4: Lector de Documentos (Installed / Active) -->
+<div class="glass-card rounded-xl p-5 flex flex-col justify-between" data-category="utilidad" data-name="Lector de Documentos" data-status="installed" id="card-reader">
+<div>
+<div class="flex items-start justify-between mb-3.5">
+<div class="w-9 h-9 rounded-lg bg-[#0d2822] border border-[#164e40] flex items-center justify-center text-[#34d399]">
+<span class="material-symbols-outlined text-[20px]">description</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="text-[10px] font-mono text-[#64748b] bg-[#0c121d] px-2 py-0.5 rounded border border-[#182335]">Archivos</span>
+<span class="text-[10px] font-mono text-[#34d399] bg-[#34d399]/10 px-2 py-0.5 rounded border border-[#34d399]/30">Activo</span>
+</div>
+</div>
+<h3 class="text-[14px] font-semibold text-[#f1f5f9] tracking-tight mb-1.5">Lector de Documentos</h3>
+<p class="text-xs text-[#94a3b8] leading-relaxed mb-4">
+                Permite a JARVIS leer y sintetizar archivos PDF, Markdown y texto sin salir de la carpeta designada.
+              </p>
+<div class="flex items-center gap-3 pt-3 border-t border-[#162030] text-[10px] font-mono text-[#64748b] mb-4">
+<span class="">v1.4.1</span>
+<span class="">•</span>
+<span class="">Sandbox 14 MB</span>
+<span class="">•</span>
+<span class="text-[#34d399]">Local I/O</span>
+</div>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<button class="flex-1 py-2 px-3 rounded-lg text-xs font-medium border border-[#34d399]/30 bg-[#34d399]/10 text-[#34d399] flex items-center justify-center gap-1.5 cursor-default" disabled="">
+<span class="material-symbols-outlined text-[15px]">check_circle</span>
+<span class="">Instalado</span>
+</button>
+<button class="p-2 rounded-lg bg-[#0f1726] border border-[#1e293b] text-[#94a3b8] hover:text-[#e2e8f0] hover:border-[#38bdf8]/40 transition-colors" title="Ajustes del lector">
+<span class="material-symbols-outlined text-[16px]">settings</span>
+</button>
+</div>
+<div class="status-msg min-h-[16px] mt-1 text-[11px] font-mono text-[#34d399]/80 text-center">Listo para usar</div>
+</div>
+</div>
+<!-- CARD 5: Explorador de Archivos (Available) -->
+<div class="glass-card rounded-xl p-5 flex flex-col justify-between" data-category="system" data-name="Explorador de Archivos" data-status="available" id="card-search">
+<div>
+<div class="flex items-start justify-between mb-3.5">
+<div class="w-9 h-9 rounded-lg bg-[#142238] border border-[#1e3456] flex items-center justify-center text-[#38bdf8]">
+<span class="material-symbols-outlined text-[20px]">folder_open</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="text-[10px] font-mono text-[#64748b] bg-[#0c121d] px-2 py-0.5 rounded border border-[#182335]">Sistema</span>
+<span class="text-[10px] font-mono text-[#94a3b8] bg-[#0f1726] px-1.5 py-0.5 rounded border border-[#1e293b]">Listo</span>
+</div>
+</div>
+<h3 class="text-[14px] font-semibold text-[#f1f5f9] tracking-tight mb-1.5">Explorador de Archivos</h3>
+<p class="text-xs text-[#94a3b8] leading-relaxed mb-4">
+                Localizá rápidamente reportes, hojas de cálculo y borradores en tu disco usando búsquedas en lenguaje natural.
+              </p>
+<div class="flex items-center gap-3 pt-3 border-t border-[#162030] text-[10px] font-mono text-[#64748b] mb-4">
+<span class="">v2.1.0</span>
+<span class="">•</span>
+<span class="">Index 24 MB</span>
+<span class="">•</span>
+<span class="text-[#2dd4bf]">Read-only</span>
+</div>
+</div>
+<div>
+<button class="w-full py-2 px-3 rounded-lg text-xs font-medium border border-[#38bdf8]/40 bg-[#38bdf8]/10 text-[#38bdf8] hover:bg-[#38bdf8] hover:text-[#070a0f] hover:font-semibold transition-all flex items-center justify-center gap-1.5" onclick="handleInstall('card-search', 'Explorador de Archivos')">
+<span class="material-symbols-outlined text-[15px]">add</span>
+<span class="">Instalar módulo</span>
+</button>
+<div class="status-msg min-h-[16px] mt-1 text-[11px] font-mono text-center"></div>
+</div>
+</div>
+<!-- CARD 6: Diapositivas y Presentaciones (Installed / Active) -->
+<div class="glass-card rounded-xl p-5 flex flex-col justify-between" data-category="visualizacion" data-name="Diapositivas y Presentaciones" data-status="installed" id="card-slides">
+<div>
+<div class="flex items-start justify-between mb-3.5">
+<div class="w-9 h-9 rounded-lg bg-[#0d2822] border border-[#164e40] flex items-center justify-center text-[#34d399]">
+<span class="material-symbols-outlined text-[20px]">slideshow</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="text-[10px] font-mono text-[#64748b] bg-[#0c121d] px-2 py-0.5 rounded border border-[#182335]">Formato</span>
+<span class="text-[10px] font-mono text-[#34d399] bg-[#34d399]/10 px-2 py-0.5 rounded border border-[#34d399]/30">Activo</span>
+</div>
+</div>
+<h3 class="text-[14px] font-semibold text-[#f1f5f9] tracking-tight mb-1.5">Diapositivas y Presentaciones</h3>
+<p class="text-xs text-[#94a3b8] leading-relaxed mb-4">
+                Crea presentaciones ejecutivas en formato editable (.pptx) renderizando puntos clave y esquemas limpios.
+              </p>
+<div class="flex items-center gap-3 pt-3 border-t border-[#162030] text-[10px] font-mono text-[#64748b] mb-4">
+<span class="">v1.0.8</span>
+<span class="">•</span>
+<span class="">Sandbox 15 MB</span>
+<span class="">•</span>
+<span class="text-[#34d399]">Offline</span>
+</div>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<button class="flex-1 py-2 px-3 rounded-lg text-xs font-medium border border-[#34d399]/30 bg-[#34d399]/10 text-[#34d399] flex items-center justify-center gap-1.5 cursor-default" disabled="">
+<span class="material-symbols-outlined text-[15px]">check_circle</span>
+<span class="">Instalado</span>
+</button>
+<button class="p-2 rounded-lg bg-[#0f1726] border border-[#1e293b] text-[#94a3b8] hover:text-[#e2e8f0] hover:border-[#38bdf8]/40 transition-colors" title="Ajustes de plantillas">
+<span class="material-symbols-outlined text-[16px]">settings</span>
+</button>
+</div>
+<div class="status-msg min-h-[16px] mt-1 text-[11px] font-mono text-[#34d399]/80 text-center">Listo para usar</div>
+</div>
+</div>
+<!-- CARD 7: Dictado Continuo HD (Available - Test error handling) -->
+<div class="glass-card rounded-xl p-5 flex flex-col justify-between" data-category="utilidad" data-name="Dictado Continuo HD" data-status="available" id="card-audio">
+<div>
+<div class="flex items-start justify-between mb-3.5">
+<div class="w-9 h-9 rounded-lg bg-[#142238] border border-[#1e3456] flex items-center justify-center text-[#38bdf8]">
+<span class="material-symbols-outlined text-[20px]">mic</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="text-[10px] font-mono text-[#64748b] bg-[#0c121d] px-2 py-0.5 rounded border border-[#182335]">Audio</span>
+<span class="text-[10px] font-mono text-[#94a3b8] bg-[#0f1726] px-1.5 py-0.5 rounded border border-[#1e293b]">Listo</span>
+</div>
+</div>
+<h3 class="text-[14px] font-semibold text-[#f1f5f9] tracking-tight mb-1.5">Dictado Continuo HD</h3>
+<p class="text-xs text-[#94a3b8] leading-relaxed mb-4">
+                Reconocimiento de voz de alta fidelidad sin conexión externa, optimizado para transcripción técnica precisa.
+              </p>
+<div class="flex items-center gap-3 pt-3 border-t border-[#162030] text-[10px] font-mono text-[#64748b] mb-4">
+<span class="">v0.9.3</span>
+<span class="">•</span>
+<span class="">VRAM 320 MB</span>
+<span class="">•</span>
+<span class="text-[#2dd4bf]">Mic Direct</span>
+</div>
+</div>
+<div>
+<button class="w-full py-2 px-3 rounded-lg text-xs font-medium border border-[#38bdf8]/40 bg-[#38bdf8]/10 text-[#38bdf8] hover:bg-[#38bdf8] hover:text-[#070a0f] hover:font-semibold transition-all flex items-center justify-center gap-1.5" onclick="handleInstall('card-audio', 'Dictado Continuo HD', true)">
+<span class="material-symbols-outlined text-[15px]">add</span>
+<span class="">Instalar módulo</span>
+</button>
+<div class="status-msg min-h-[16px] mt-1 text-[11px] font-mono text-center"></div>
+</div>
+</div>
+<!-- CARD 8: Alertas de Escritorio (Installed / Active) -->
+<div class="glass-card rounded-xl p-5 flex flex-col justify-between" data-category="system" data-name="Alertas de Escritorio" data-status="installed" id="card-notify">
+<div>
+<div class="flex items-start justify-between mb-3.5">
+<div class="w-9 h-9 rounded-lg bg-[#0d2822] border border-[#164e40] flex items-center justify-center text-[#34d399]">
+<span class="material-symbols-outlined text-[20px]">notifications_active</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="text-[10px] font-mono text-[#64748b] bg-[#0c121d] px-2 py-0.5 rounded border border-[#182335]">Sistema</span>
+<span class="text-[10px] font-mono text-[#34d399] bg-[#34d399]/10 px-2 py-0.5 rounded border border-[#34d399]/30">Activo</span>
+</div>
+</div>
+<h3 class="text-[14px] font-semibold text-[#f1f5f9] tracking-tight mb-1.5">Alertas de Escritorio</h3>
+<p class="text-xs text-[#94a3b8] leading-relaxed mb-4">
+                Emite avisos visuales discretos en el sistema operativo cuando una tarea de fondo concluye exitosamente.
+              </p>
+<div class="flex items-center gap-3 pt-3 border-t border-[#162030] text-[10px] font-mono text-[#64748b] mb-4">
+<span class="">v1.1.2</span>
+<span class="">•</span>
+<span class="">Daemon 2 MB</span>
+<span class="">•</span>
+<span class="text-[#34d399]">Native DBus</span>
+</div>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<button class="flex-1 py-2 px-3 rounded-lg text-xs font-medium border border-[#34d399]/30 bg-[#34d399]/10 text-[#34d399] flex items-center justify-center gap-1.5 cursor-default" disabled="">
+<span class="material-symbols-outlined text-[15px]">check_circle</span>
+<span class="">Instalado</span>
+</button>
+<button class="p-2 rounded-lg bg-[#0f1726] border border-[#1e293b] text-[#94a3b8] hover:text-[#e2e8f0] hover:border-[#38bdf8]/40 transition-colors" title="Ajustes de notificación">
+<span class="material-symbols-outlined text-[16px]">settings</span>
+</button>
+</div>
+<div class="status-msg min-h-[16px] mt-1 text-[11px] font-mono text-[#34d399]/80 text-center">Listo para usar</div>
+</div>
+</div>
+<!-- CARD 9: Flujos de Trabajo por Lotes (Available) -->
+<div class="glass-card rounded-xl p-5 flex flex-col justify-between" data-category="system" data-name="Flujos de Trabajo por Lotes" data-status="available" id="card-generic">
+<div>
+<div class="flex items-start justify-between mb-3.5">
+<div class="w-9 h-9 rounded-lg bg-[#142238] border border-[#1e3456] flex items-center justify-center text-[#38bdf8]">
+<span class="material-symbols-outlined text-[20px]">account_tree</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="text-[10px] font-mono text-[#64748b] bg-[#0c121d] px-2 py-0.5 rounded border border-[#182335]">Automatización</span>
+<span class="text-[10px] font-mono text-[#94a3b8] bg-[#0f1726] px-1.5 py-0.5 rounded border border-[#1e293b]">Listo</span>
+</div>
+</div>
+<h3 class="text-[14px] font-semibold text-[#f1f5f9] tracking-tight mb-1.5">Flujos de Trabajo por Lotes</h3>
+<p class="text-xs text-[#94a3b8] leading-relaxed mb-4">
+                Encadená múltiples acciones consecutivas para procesar lotes de datos y generar reportes con un solo comando.
+              </p>
+<div class="flex items-center gap-3 pt-3 border-t border-[#162030] text-[10px] font-mono text-[#64748b] mb-4">
+<span class="">v1.3.0</span>
+<span class="">•</span>
+<span class="">Pipeline 11 MB</span>
+<span class="">•</span>
+<span class="text-[#2dd4bf]">Local</span>
+</div>
+</div>
+<div>
+<button class="w-full py-2 px-3 rounded-lg text-xs font-medium border border-[#38bdf8]/40 bg-[#38bdf8]/10 text-[#38bdf8] hover:bg-[#38bdf8] hover:text-[#070a0f] hover:font-semibold transition-all flex items-center justify-center gap-1.5" onclick="handleInstall('card-generic', 'Flujos por Lotes')">
+<span class="material-symbols-outlined text-[15px]">add</span>
+<span class="">Instalar módulo</span>
+</button>
+<div class="status-msg min-h-[16px] mt-1 text-[11px] font-mono text-center"></div>
+</div>
+</div>
+</div>
+<!-- EMPTY STATE (Sober, matching system aesthetics) -->
+<div class="hidden flex-col items-center justify-center h-72 text-center select-none py-10" id="emptyState">
+<div class="w-12 h-12 rounded-xl bg-[#0e1624] border border-[#1e293b] flex items-center justify-center text-[#64748b] mb-3">
+<span class="material-symbols-outlined text-[24px]">extension_off</span>
+</div>
+<h4 class="text-sm font-semibold text-[#cbd5e1] mb-1">No hay plugins que coincidan</h4>
+<p class="text-xs text-[#64748b] max-w-sm">
+            No se encontraron módulos locales en esta categoría o para el término de búsqueda ingresado.
+          </p>
+<button class="mt-4 px-3.5 py-1.5 text-xs text-[#38bdf8] bg-[#0c1320] border border-[#38bdf8]/30 rounded-lg hover:bg-[#38bdf8]/10 transition-colors font-mono" onclick="resetFilters()">
+            Restablecer filtros
+          </button>
+</div>
+</div>
+<!-- FOOTER STATUS STRIP (Unifed Fixed Status Bar) -->
+<footer class="h-8 border-t border-[#182030] bg-[#070a0f] px-8 flex items-center justify-between text-[11px] font-mono text-[#64748b] flex-shrink-0">
+<div class="flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-[#38bdf8]"></span>
+<span class="">JARVIS v4.8.2 // Ecosistema Local Confinado</span>
+</div>
+<div class="hidden sm:flex items-center gap-2">
+<span class="">Todos los módulos operan 100% offline</span>
+</div>
+</footer>
+</main>
+</div>
+<!-- INTERACTIVITY & FILTER SCRIPT -->
+<script>
+    let activeInstalled = 4;
+    let activeAvailable = 5;
+    let currentFilter = 'all';
+
+    function updateCounters() {
+      document.getElementById('badge-installed').innerText = activeInstalled;
+      document.getElementById('badge-avail').innerText = activeAvailable;
+      document.getElementById('badge-all').innerText = activeInstalled + activeAvailable;
+    }
+
+    function handleInstall(cardId, pluginName, willFail = false) {
+      const card = document.getElementById(cardId);
+      if (!card) return;
+
+      const btn = card.querySelector('button');
+      const statusDiv = card.querySelector('.status-msg');
+
+      // State: INSTALANDO...
+      btn.className = "w-full py-2 px-3 rounded-lg text-xs font-medium border border-[#38bdf8]/50 bg-[#38bdf8]/15 text-[#38bdf8] flex items-center justify-center gap-2 cursor-wait";
+      btn.disabled = true;
+      btn.innerHTML = `
+        <svg class="animate-spin h-3.5 w-3.5 text-[#38bdf8]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span>Verificando sandbox...</span>
+      `;
+      statusDiv.innerHTML = '';
+
+      setTimeout(() => {
+        if (willFail) {
+          btn.className = "w-full py-2 px-3 rounded-lg text-xs font-medium border border-[#38bdf8]/40 bg-[#38bdf8]/10 text-[#38bdf8] hover:bg-[#38bdf8] hover:text-[#070a0f] hover:font-semibold transition-all flex items-center justify-center gap-1.5";
+          btn.disabled = false;
+          btn.innerHTML = `
+            <span class="material-symbols-outlined text-[15px]">add</span>
+            <span>Reintentar instalación</span>
+          `;
+          statusDiv.className = "status-msg min-h-[16px] mt-1 text-[11px] font-mono text-[#f87171] text-center";
+          statusDiv.innerHTML = 'Fallo en comprobación hash. Reintentar.';
+        } else {
+          // Success State
+          const actionContainer = btn.parentElement;
+          actionContainer.innerHTML = `
+            <div class="flex items-center gap-2">
+              <button disabled class="flex-1 py-2 px-3 rounded-lg text-xs font-medium border border-[#34d399]/30 bg-[#34d399]/10 text-[#34d399] flex items-center justify-center gap-1.5 cursor-default">
+                <span class="material-symbols-outlined text-[15px]">check_circle</span>
+                <span>Instalado</span>
+              </button>
+              <button title="Ajustes" class="p-2 rounded-lg bg-[#0f1726] border border-[#1e293b] text-[#94a3b8] hover:text-[#e2e8f0] hover:border-[#38bdf8]/40 transition-colors">
+                <span class="material-symbols-outlined text-[16px]">settings</span>
+              </button>
+            </div>
+            <div class="status-msg min-h-[16px] mt-1 text-[11px] font-mono text-[#34d399]/80 text-center">Listo para usar</div>
+          `;
+
+          // Update icon box & badge to installed emerald theme
+          const iconWrapper = card.querySelector('.w-9');
+          if (iconWrapper) {
+            iconWrapper.className = "w-9 h-9 rounded-lg bg-[#0d2822] border border-[#164e40] flex items-center justify-center text-[#34d399]";
+          }
+          
+          const statusBadge = card.querySelectorAll('span.text-\\[10px\\]')[1];
+          if (statusBadge) {
+            statusBadge.className = "text-[10px] font-mono text-[#34d399] bg-[#34d399]/10 px-2 py-0.5 rounded border border-[#34d399]/30";
+            statusBadge.innerText = "Activo";
+          }
+
+          card.dataset.status = "installed";
+          activeInstalled++;
+          activeAvailable = Math.max(0, activeAvailable - 1);
+          updateCounters();
+        }
+      }, 1400);
+    }
+
+    function filterPlugins(type, btn) {
+      currentFilter = type;
+      // Update pill buttons visual
+      document.querySelectorAll('#filterTabs .filter-pill').forEach(b => {
+        b.className = "filter-pill px-3 py-1 rounded-md text-xs font-medium text-[#94a3b8] hover:text-[#e2e8f0] hover:bg-[#131b2a] border border-transparent transition-colors";
+      });
+      btn.className = "filter-pill active px-3 py-1 rounded-md text-xs font-medium bg-[#1e293b] text-[#f8fafc] border border-[#334155] transition-colors";
+
+      applyFilters();
+    }
+
+    function handleSearch(query) {
+      applyFilters();
+    }
+
+    function applyFilters() {
+      const query = (document.getElementById('pluginSearchInput').value || '').toLowerCase().trim();
+      const cards = document.querySelectorAll('#pluginGrid > div');
+      let visibleCount = 0;
+
+      cards.forEach(card => {
+        const name = (card.dataset.name || '').toLowerCase();
+        const status = card.dataset.status;
+        const category = card.dataset.category;
+
+        let matchesFilter = true;
+        if (currentFilter === 'installed') matchesFilter = (status === 'installed');
+        else if (currentFilter === 'available') matchesFilter = (status === 'available');
+        else if (currentFilter === 'system') matchesFilter = (category === 'system');
+
+        let matchesQuery = true;
+        if (query) {
+          matchesQuery = name.includes(query) || card.innerText.toLowerCase().includes(query);
+        }
+
+        if (matchesFilter && matchesQuery) {
+          card.classList.remove('hidden');
+          card.classList.add('flex');
+          visibleCount++;
+        } else {
+          card.classList.add('hidden');
+          card.classList.remove('flex');
+        }
+      });
+
+      const emptyState = document.getElementById('emptyState');
+      if (visibleCount === 0) {
+        emptyState.classList.remove('hidden');
+        emptyState.classList.add('flex');
+      } else {
+        emptyState.classList.add('hidden');
+        emptyState.classList.remove('flex');
+      }
+    }
+
+    function resetFilters() {
+      document.getElementById('pluginSearchInput').value = '';
+      const allBtn = document.querySelector('#filterTabs button:first-child');
+      filterPlugins('all', allBtn);
+    }
+
+    function toggleEmptyState() {
+      const grid = document.getElementById('pluginGrid');
+      const empty = document.getElementById('emptyState');
+      const toggleBtn = document.getElementById('toggleEmptyBtn');
+
+      if (grid.classList.contains('hidden')) {
+        grid.classList.remove('hidden');
+        empty.classList.add('hidden');
+        empty.classList.remove('flex');
+        toggleBtn.innerText = '[Estado vacío]';
+      } else {
+        grid.classList.add('hidden');
+        empty.classList.remove('hidden');
+        empty.classList.add('flex');
+        toggleBtn.innerText = '[Mostrar plugins]';
+      }
+    }
+
+    // Keyboard shortcut for Ctrl+K
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        const searchInput = document.getElementById('pluginSearchInput');
+        searchInput.focus();
+        searchInput.select();
+      }
+    });
+  </script>
+
+
+
+
+</body></html>

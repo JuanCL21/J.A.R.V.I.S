@@ -23,6 +23,7 @@ CATÁLOGO CURADO DE DESARROLLO:
   de auditoría humana antes de cualquier despliegue en producción.
 """
 
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -99,6 +100,74 @@ def load_curated_catalog(catalog_path: Optional[Union[str, Path]] = None) -> Dic
     return catalog_by_id
 
 
+_GIT_URL_REGEX = re.compile(r"^https://([a-zA-Z0-9.-]+)/.+")
+_DEFAULT_ALLOWED_GIT_HOSTS = {"github.com", "gitlab.com"}
+
+
+def get_allowed_git_hosts() -> set[str]:
+    """Retorna el conjunto de hosts Git autorizados (por defecto github.com y gitlab.com, configurable vía JARVIS_ALLOWED_GIT_HOSTS)."""
+    env_hosts = os.environ.get("JARVIS_ALLOWED_GIT_HOSTS")
+    if env_hosts:
+        return {h.strip().lower() for h in env_hosts.split(",") if h.strip()}
+    return set(_DEFAULT_ALLOWED_GIT_HOSTS)
+
+
+def validate_source_url(source_url: str) -> None:
+    """
+    Valida de forma estricta y fail-closed el esquema y formato de source_url ANTES de
+    cualquier interacción con el sistema operativo o procesos de Git.
+
+    Reglas de seguridad:
+    1. Rechazo de transportes maliciosos (ej. '::' o 'ext::').
+    2. Rechazo de prefijo '-' (anti-inyección de flags a binarios de git).
+    3. Esquema HTTPS con regex estricto ^https://[a-zA-Z0-9.-]+/.+ y allowlist de dominios.
+    4. Directorios locales permitidos únicamente si son rutas absolutas existentes.
+    """
+    if not source_url or not isinstance(source_url, str):
+        raise ValueError("source_url inválido: no puede estar vacío.")
+
+    clean_url = source_url.strip()
+
+    # 1. Validación de esquema y rechazo de transportes maliciosos antes de invocar subprocesos
+    if "::" in clean_url:
+        raise ValueError(
+            f"source_url inválido: transporte o comando no permitido detectado ('{source_url}')."
+        )
+
+    # 2. Validación de prefijo '-' (evita inyección de flags a binarios de git)
+    if clean_url.startswith("-"):
+        raise ValueError(
+            f"source_url inválido: no puede comenzar con '-' ('{source_url}')."
+        )
+
+    # 3. Validación de esquema HTTPS con regex ^https://[a-zA-Z0-9.-]+/.+ y allowlist de dominios
+    if clean_url.startswith("https://"):
+        match = _GIT_URL_REGEX.match(clean_url)
+        if not match:
+            raise ValueError(
+                f"source_url no cumple el patrón requerido '^https://[a-zA-Z0-9.-]+/.+': '{source_url}'"
+            )
+        host = match.group(1).lower()
+        allowed_hosts = get_allowed_git_hosts()
+        if host not in allowed_hosts:
+            raise ValueError(
+                f"Dominio no permitido en source_url: '{host}'. Dominios autorizados: {sorted(allowed_hosts)}"
+            )
+        return
+
+    # 4. Si no es https://, verificar si es directorio local existente absoluto (para tests y fixtures aislados)
+    try:
+        local_path = Path(clean_url)
+        is_local_dir = local_path.is_absolute() and local_path.is_dir()
+    except Exception:
+        is_local_dir = False
+
+    if not is_local_dir:
+        raise ValueError(
+            f"source_url no permitido: '{source_url}'. Debe comenzar con 'https://' hacia un dominio autorizado o ser un directorio local absoluto existente."
+        )
+
+
 def resolve_git_ref(source_url: str, ref: str = "HEAD") -> str:
     """
     Resuelve el hash de commit concreto (40 caracteres hexadecimales) para una ref dada
@@ -106,41 +175,11 @@ def resolve_git_ref(source_url: str, ref: str = "HEAD") -> str:
     NUNCA devuelve ni persiste la referencia mutable.
 
     REGLAS DE SEGURIDAD (ANTI-INYECCIÓN DE ARGUMENTOS Y TRANSPORTE SEGURO):
-    1. Rechazo explícito (fail-closed) ANTES de invocar procesos si source_url o ref empiezan con '-'.
-    2. Allowlist estricta de esquemas en source_url: únicamente 'https://' para repos remotos o rutas
-       de directorios locales existentes. Cualquier otro esquema ('ext::', 'ssh://', 'git://', 'file://', etc.)
-       o uso de '::' se rechaza con ValueError antes de tocar subprocesos.
+    1. Rechazo explícito (fail-closed) ANTES de invocar procesos si source_url no cumple validate_source_url().
+    2. Allowlist estricta de esquema y dominios: únicamente 'https://' hacia hosts autorizados o rutas locales absolutas.
     3. Defensa en profundidad mediante '--' en git ls-remote y '--end-of-options' en git rev-parse.
     """
-    # 1. Validación estricta y fail-closed de source_url
-    if not source_url or not isinstance(source_url, str) or source_url.strip().startswith("-"):
-        raise ValueError(
-            f"source_url inválido: no puede estar vacío ni comenzar con '-' ('{source_url}')."
-        )
-
-    # 2. Allowlist estricta de esquema para source_url (prevención de transporte malicioso como ext::, ssh://, file://)
-    clean_url = source_url.strip()
-    if "::" in clean_url:
-        raise ValueError(
-            f"source_url inválido: transporte o comando no permitido detectado ('{source_url}')."
-        )
-
-    is_https = clean_url.startswith("https://")
-    if not is_https:
-        if "://" in clean_url:
-            raise ValueError(
-                f"source_url con esquema no permitido: '{source_url}'. Solo se permite 'https://' o directorios locales existentes."
-            )
-        try:
-            local_path = Path(clean_url)
-            is_local_dir = local_path.is_dir()
-        except Exception:
-            is_local_dir = False
-
-        if not is_local_dir:
-            raise ValueError(
-                f"source_url no permitido: '{source_url}'. Debe comenzar exactamente con 'https://' o ser un directorio local existente."
-            )
+    validate_source_url(source_url)
 
     # 3. Validación estricta y fail-closed de ref
     clean_ref = ref.strip() if isinstance(ref, str) else ""
@@ -341,17 +380,147 @@ class PluginInstaller:
 
 
 # ---------------------------------------------------------------------------
-# Funciones públicas de nivel de módulo para la UI y la API de JARVIS
+# Tipos de datos y funciones públicas para UI y la API de JARVIS
 # ---------------------------------------------------------------------------
 
-def install_from_catalog(plugin_id: str) -> Dict[str, Any]:
+@dataclass(frozen=True)
+class CuratedPluginInfo:
     """
-    Función de cara al usuario final para instalación desde el catálogo curado.
-    REGLA DE SEGURIDAD ESTRICTA: SOLO recibe plugin_id. No expone parámetros opcionales,
-    valores por defecto ni **kwargs para commit_hash o source_url.
+    Información pública de un plugin del catálogo curado para presentación en UI.
+    REGLA DE SEGURIDAD ESTRICTA: No incluye commit_hash, source_url, reviewed_by ni status.
     """
+    plugin_id: str
+    name: str
+    description: str
+    icon: str
+    is_installed: bool
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "plugin_id": self.plugin_id,
+            "name": self.name,
+            "description": self.description,
+            "icon": self.icon,
+            "is_installed": self.is_installed,
+        }
+
+    def __getitem__(self, item: str) -> Any:
+        return getattr(self, item)
+
+
+@dataclass(frozen=True)
+class InstallResult:
+    """
+    Resultado público de la instalación de un plugin del catálogo curado.
+    Contiene mensajes legibles para el usuario final sin jerga técnica ni datos de auditoría.
+    """
+    success: bool
+    message: str
+    plugin_id: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "success": self.success,
+            "message": self.message,
+            "plugin_id": self.plugin_id,
+        }
+
+    def __getitem__(self, item: str) -> Any:
+        return getattr(self, item)
+
+
+def list_curated_plugins(
+    registry: Optional[PluginRegistry] = None,
+    catalog_path: Optional[Union[str, Path]] = None,
+) -> List[CuratedPluginInfo]:
+    """
+    Devuelve el catálogo curado completo, listo para mostrar al usuario final.
+    Lee curated_catalog.json y cruza contra el estado de instalación actual.
+    REGLA DE SEGURIDAD ESTRICTA:
+    La UI nunca debe ver commit_hash, source_url, reviewed_by ni status interno.
+    """
+    reg = registry or PluginRegistry()
+    cat_path = resolve_catalog_path(catalog_path)
+    catalog = load_curated_catalog(cat_path)
+
+    result: List[CuratedPluginInfo] = []
+    for plugin_id, item in catalog.items():
+        installed_plugin = reg.get_plugin(plugin_id)
+        is_installed = bool(installed_plugin and installed_plugin.get("status") == "curado")
+
+        result.append(
+            CuratedPluginInfo(
+                plugin_id=plugin_id,
+                name=item.get("name", plugin_id),
+                description=item.get("description", ""),
+                icon=item.get("icon", ""),
+                is_installed=is_installed,
+            )
+        )
+
+    return result
+
+
+def install_from_catalog(plugin_id: str) -> InstallResult:
+    """
+    Instala un plugin del catálogo curado por su plugin_id.
+    Devuelve éxito/error y un mensaje legible para mostrar al usuario final.
+    REGLA DE SEGURIDAD ESTRICTA:
+    - SOLO expone plugin_id (no admite source_url, commit_hash ni flags de auditoría).
+    - Si el plugin ya está instalado, maneja la situación con gracia sin reinstalar ni lanzar excepción.
+    - No filtra datos técnicos (commits, URLs, reviewed_by, status) hacia el llamador.
+    """
+    if not plugin_id or not isinstance(plugin_id, str) or plugin_id.strip().startswith("-"):
+        return InstallResult(
+            success=False,
+            message="Identificador de plugin inválido.",
+            plugin_id=str(plugin_id) if plugin_id else "",
+        )
+
     installer = PluginInstaller()
-    return installer.install_from_catalog(plugin_id)
+
+    # 1. Verificar existencia en el catálogo curado
+    try:
+        catalog = load_curated_catalog(installer.catalog_path)
+    except Exception:
+        return InstallResult(
+            success=False,
+            message="No se pudo cargar el catálogo de plugins disponibles.",
+            plugin_id=plugin_id,
+        )
+
+    if plugin_id not in catalog:
+        return InstallResult(
+            success=False,
+            message=f"El plugin '{plugin_id}' no existe en el catálogo curado.",
+            plugin_id=plugin_id,
+        )
+
+    plugin_name = catalog[plugin_id].get("name", plugin_id)
+
+    # 2. Verificar si ya se encuentra instalado
+    existing = installer.registry.get_plugin(plugin_id)
+    if existing and existing.get("status") == "curado":
+        return InstallResult(
+            success=False,
+            message=f"El plugin '{plugin_name}' ya se encuentra instalado.",
+            plugin_id=plugin_id,
+        )
+
+    # 3. Proceder con la instalación
+    try:
+        installer.install_from_catalog(plugin_id)
+        return InstallResult(
+            success=True,
+            message=f"El plugin '{plugin_name}' se instaló correctamente.",
+            plugin_id=plugin_id,
+        )
+    except Exception:
+        return InstallResult(
+            success=False,
+            message="No se pudo instalar el plugin, intentá de nuevo.",
+            plugin_id=plugin_id,
+        )
 
 
 def install_from_url(
@@ -365,3 +534,4 @@ def install_from_url(
     """
     installer = PluginInstaller()
     return installer.install_from_url(source_url=source_url, plugin_id=plugin_id, ref=ref)
+

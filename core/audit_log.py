@@ -108,6 +108,7 @@ class AuditLogger:
         self,
         plugin_id: Optional[str] = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """Consulta los registros de auditoría más recientes con cierre garantizado de conexión."""
         query = "SELECT * FROM audit_logs"
@@ -115,8 +116,8 @@ class AuditLogger:
         if plugin_id:
             query += " WHERE plugin_id = ?"
             params.append(plugin_id)
-        query += " ORDER BY id DESC LIMIT ?"
-        params.append(limit)
+        query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
 
         conn = self._get_connection()
         try:

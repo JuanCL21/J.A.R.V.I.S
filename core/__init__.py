@@ -42,7 +42,25 @@ from .plugin_installer import (
     install_from_url,
     resolve_catalog_path,
     load_curated_catalog,
+    CuratedPluginInfo,
+    InstallResult,
+    list_curated_plugins,
+    validate_source_url,
 )
+from .audio_devices import (
+    AudioDeviceInfo,
+    list_input_devices,
+    list_output_devices,
+    get_default_input_device,
+    get_default_output_device,
+)
+from .voice_session import (
+    VoiceSession,
+    SILENCE_TIMEOUT_SECONDS,
+    MAX_RECONNECT_ATTEMPTS,
+    RECONNECT_BACKOFF_DELAYS,
+)
+
 
 # TODO: default_plugin_registry a nivel de módulo eliminado para evitar efectos secundarios en imports.
 # Instanciar PluginRegistry explícitamente donde se requiera.
@@ -67,7 +85,12 @@ __all__ = [
     "install_from_url",
     "resolve_catalog_path",
     "load_curated_catalog",
+    "CuratedPluginInfo",
+    "InstallResult",
+    "list_curated_plugins",
+    "validate_source_url",
     "_SENSITIVE_SUBDIRS",
+
     "resolve_sandbox_root",
     "is_safe_path",
     "register_authorized_root",
@@ -81,4 +104,13 @@ __all__ = [
     "PluginManifest",
     "ActionDefinition",
     "Dispatcher",
+    "AudioDeviceInfo",
+    "list_input_devices",
+    "list_output_devices",
+    "get_default_input_device",
+    "get_default_output_device",
+    "VoiceSession",
+    "SILENCE_TIMEOUT_SECONDS",
+    "MAX_RECONNECT_ATTEMPTS",
+    "RECONNECT_BACKOFF_DELAYS",
 ]

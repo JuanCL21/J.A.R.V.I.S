@@ -22,7 +22,7 @@ import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
-from PyQt6.QtCore import QPoint, QPointF, Qt, QTimer
+from PyQt6.QtCore import QPoint, QPointF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QPainter,
@@ -35,9 +35,75 @@ from PyQt6.QtWidgets import QWidget
 
 
 class VisualizerState(str, Enum):
+
     REPOSO = "reposo"
     ESCUCHANDO = "escuchando"
+    PENSANDO = "pensando"
     HABLANDO = "hablando"
+
+
+# ---------------------------------------------------------------------
+# SISTEMA DE COLOR CONTEXTUAL & FÍSICA PROCEDURAL (AI Orb Prototype v2)
+# El color nunca es aleatorio: cada contexto define un tono fijo con significado.
+# Contexto neutral (familia azul hue=216) y modulación precisa por estado técnico.
+# ---------------------------------------------------------------------
+
+COLOR_CONTEXTS = {
+    "neutral": {"hue": 216.0},  # única familia activa: azul eléctrico profundo
+}
+
+STATE_PARAMS = {
+    "idle": {
+        "breathe_amp": 0.025,
+        "breathe_speed": 0.35,
+        "core_light": 97.0,
+        "mid_light": 80.0,
+        "edge_light": 52.0,
+        "sat": 55.0,
+        "halo_strength": 0.6,
+        "highlight_drift": 0.08,
+    },
+    "listening": {
+        "breathe_amp": 0.006,        # casi quieto: atención máxima
+        "breathe_speed": 0.15,
+        "core_light": 99.0,
+        "mid_light": 85.0,
+        "edge_light": 58.0,
+        "sat": 50.0,
+        "halo_strength": 0.7,
+        "highlight_drift": 0.22,     # el brillo interno reacciona más rápido
+    },
+    "thinking": {
+        "breathe_amp": 0.045,        # pulsación concentrada de procesamiento
+        "breathe_speed": 2.2,        # ritmo dinámico de computación
+        "core_light": 98.0,
+        "mid_light": 82.0,
+        "edge_light": 54.0,
+        "sat": 68.0,
+        "halo_strength": 0.84,
+        "highlight_drift": 0.42,
+    },
+    "speaking": {
+        "breathe_amp": 0.05,
+        "breathe_speed": 1.5,        # ritmo marcado, distinto a escuchar
+        "core_light": 96.0,
+        "mid_light": 75.0,
+        "edge_light": 46.0,
+        "sat": 62.0,
+        "halo_strength": 0.78,
+        "highlight_drift": 0.3,
+    },
+}
+
+
+def make_hsl_color(hue: float, sat: float, light: float, alpha: float = 1.0) -> QColor:
+    """Genera un QColor nativo a partir de coordenadas HSL exactas del prototipo."""
+    h_norm = ((hue % 360.0) + 360.0) % 360.0 / 360.0
+    s_norm = max(0.0, min(1.0, sat / 100.0))
+    l_norm = max(0.0, min(1.0, light / 100.0))
+    a_norm = max(0.0, min(1.0, alpha))
+    return QColor.fromHslF(h_norm, s_norm, l_norm, a_norm)
+
 
 
 class FibonacciSphere3D:
@@ -195,18 +261,26 @@ class ReactiveAudioVisualizer(QWidget):
     """
 
     NUM_DEPTH_TIERS = 4
+    clicked = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None, num_nodes: int = 144):
         super().__init__(parent)
         self.setMinimumSize(320, 320)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setStyleSheet("background: transparent;")
+        self.show_wireframe: bool = False
 
         # 1. Geometría 3D precalculada
         self.sphere = FibonacciSphere3D(num_nodes=num_nodes)
         self.num_nodes = num_nodes
 
-        # 2. Estado visual del asistente
+        # 2. Estado visual del asistente y modelo contextual HSL (AI Orb Prototype v2)
         self.state: VisualizerState = VisualizerState.REPOSO
+        self.active_context: str = "neutral"
+        self.state_name: str = "idle"
+        self.current_params: Dict[str, float] = dict(STATE_PARAMS["idle"])
+        self.target_params: Dict[str, float] = STATE_PARAMS["idle"]
 
         # 3. Ángulos de rotación y tiempo de animación
         self.angle_x: float = 0.2
@@ -239,10 +313,51 @@ class ReactiveAudioVisualizer(QWidget):
         self.speech_amplitude: float = 0.0
         self.speech_target_amplitude: float = 0.0
 
+        # Simulación de audio y drift dinámico (Stitch AI Orb v2)
+        self.audio_level: float = 0.05
+        self.target_audio_level: float = 0.05
+        self.pointer_x: float = 0.0
+        self.pointer_y: float = 0.0
+        self.pointer_tx: float = 0.0
+        self.pointer_ty: float = 0.0
+
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Toca el orbe para interactuar con JARVIS")
+
         # 8. Timer de animación (60 FPS objetivo -> 16 ms)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._on_animation_frame)
         self.timer.start(16)
+
+    def mouseMoveEvent(self, event) -> None:
+        """Reactividad al cursor del ratón (deriva suave del resplandor especular)."""
+        w = self.width()
+        h = self.height()
+        if w > 0 and h > 0:
+            cx = w / 2.0
+            cy = h / 2.0
+            self.pointer_tx = float((event.pos().x() - cx) / cx)
+            self.pointer_ty = float((event.pos().y() - cy) / cy)
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        """Restablece el objetivo de deriva al salir el cursor."""
+        self.pointer_tx = 0.0
+        self.pointer_ty = 0.0
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        """Al hacer clic en el orbe, emite señal y cicla interactivamente el estado de voz como en Stitch."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            if self.state == VisualizerState.REPOSO:
+                self.set_state(VisualizerState.ESCUCHANDO)
+            elif self.state == VisualizerState.ESCUCHANDO:
+                self.set_state(VisualizerState.HABLANDO)
+            else:
+                self.set_state(VisualizerState.REPOSO)
+        super().mousePressEvent(event)
 
     def _precompute_tiered_sprites(self) -> Dict[str, List[Tuple[int, QPixmap]]]:
         """
@@ -324,9 +439,17 @@ class ReactiveAudioVisualizer(QWidget):
         return result
 
     def set_state(self, new_state: VisualizerState) -> None:
-        """Cambia el estado visual del visualizador."""
+        """Cambia el estado visual del visualizador con interpolación suave de parámetros."""
         if self.state != new_state:
             self.state = new_state
+            if self.state == VisualizerState.REPOSO:
+                self.state_name = "idle"
+            elif self.state == VisualizerState.ESCUCHANDO:
+                self.state_name = "listening"
+            elif self.state == VisualizerState.HABLANDO:
+                self.state_name = "speaking"
+
+            self.target_params = STATE_PARAMS[self.state_name]
             self.update()
 
     def feed_audio_samples(
@@ -372,37 +495,54 @@ class ReactiveAudioVisualizer(QWidget):
         self.speech_target_amplitude = float(np.clip(amplitude, 0.0, 1.0))
 
     def _on_animation_frame(self) -> None:
-        """Actualiza el frame de animación según el estado activo."""
-        self.time_counter += 0.016
+        """Actualiza el frame de animación según las ecuaciones exactas del prototipo v2."""
+        dt = 0.016
+        self.time_counter += dt
 
+        # Suavizado exponencial exacto del prototipo v2: s = 1 - Math.pow(0.0008, dt)
+        s = 1.0 - math.pow(0.0008, dt)
+        for k, target_val in self.target_params.items():
+            self.current_params[k] += (target_val - self.current_params[k]) * s
+
+        # Suavizado de la deriva de puntero (interacción del ratón)
+        self.pointer_x += (self.pointer_tx - self.pointer_x) * 0.08
+        self.pointer_y += (self.pointer_ty - self.pointer_y) * 0.08
+
+        # Nivel de audio reactivo según el prototipo v2: lerp con 1 - Math.pow(0.001, dt)
+        s_audio = 1.0 - math.pow(0.001, dt)
         if self.state == VisualizerState.REPOSO:
-            # Rotación suave y constante en reposo
             self.angle_y += self.rotation_speed_idle
             self.angle_x = 0.22 + 0.05 * math.sin(self.time_counter * 0.8)
             self.freq_bands *= 0.90
             self.speech_amplitude *= 0.85
+            audio_target = 0.05
 
         elif self.state == VisualizerState.ESCUCHANDO:
-            # Rotación viva durante la escucha
             self.angle_y += self.rotation_speed_idle * 1.4
             self.angle_x = 0.25 + 0.08 * math.sin(self.time_counter * 1.1)
             self.freq_bands *= self.band_decay
+            band_mean = float(np.mean(self.freq_bands)) if len(self.freq_bands) > 0 else 0.0
+            if band_mean > 0.02:
+                audio_target = 0.25 + band_mean * 0.45
+            else:
+                audio_target = 0.25 + np.random.uniform(0.0, 0.15)
 
         elif self.state == VisualizerState.HABLANDO:
-            # Rotación cadenciosa
             self.angle_y += self.rotation_speed_idle * 1.2
             self.angle_x = 0.22 + 0.04 * math.sin(self.time_counter * 0.9)
-
-            if self.speech_target_amplitude <= 0.01:
+            if self.speech_target_amplitude > 0.01:
+                self.speech_amplitude += (
+                    self.speech_target_amplitude - self.speech_amplitude
+                ) * 0.45
+                audio_target = 0.25 + self.speech_amplitude * 0.50
+            else:
                 cadence = 0.35 + 0.45 * (
                     0.5 * math.sin(self.time_counter * 7.5) * math.cos(self.time_counter * 3.2) + 0.5
                 )
                 self.speech_amplitude += (cadence - self.speech_amplitude) * 0.35
-            else:
-                self.speech_amplitude += (
-                    self.speech_target_amplitude - self.speech_amplitude
-                ) * 0.45
+                audio_target = 0.25 + abs(math.sin(self.time_counter * 7.0)) * 0.50
 
+        self.audio_level += (audio_target - self.audio_level) * s_audio
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
@@ -413,78 +553,149 @@ class ReactiveAudioVisualizer(QWidget):
 
     def render_frame(self, painter: QPainter, width: int, height: int) -> None:
         """
-        Dibuja un frame completo sobre QPainter mediante proyección 3D y composición 2D ultrarrápida.
+        Dibuja un frame completo del Glowing AI Orb de Stitch mediante composición multicapa en QPainter
+        reproduciendo exactamente el renderizado del prototipo y Stitch sin wireframes distractores.
         """
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        center = (width / 2.0, height / 2.0)
-        base_radius = min(width, height) * 0.32
+        cx = width / 2.0
+        cy = height / 2.0
+        base_radius = min(width, height) * 0.22
 
-        # 1. Modulación geométrica según el estado
+        # Respiración y pulso orgánico del prototipo
+        breathe = 1.0 + math.sin(self.time_counter * self.current_params["breathe_speed"]) * self.current_params["breathe_amp"]
+        current_radius = base_radius * (breathe + self.audio_level * 0.15)
+        R = current_radius
+
+        # Deriva especular armónica y reactiva al puntero
+        spec_drift_x = math.sin(self.time_counter * self.current_params["highlight_drift"]) * 0.20 + self.pointer_x * 0.25
+        spec_drift_y = math.cos(self.time_counter * self.current_params["highlight_drift"] * 0.8) * 0.16 + self.pointer_y * 0.25
+
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        # CAPA 0: Resplandor ambiental difuso de fondo (Atmósfera del escenario Stitch)
+        stage_r = min(width, height) * 0.72
+        stage_glow = QRadialGradient(cx, cy, stage_r)
+        stage_glow.setColorAt(0.0, QColor(137, 206, 255, 22))
+        stage_glow.setColorAt(0.45, QColor(79, 219, 200, 12))
+        stage_glow.setColorAt(1.0, QColor(3, 4, 9, 0))
+        painter.setBrush(stage_glow)
+        painter.drawEllipse(QPointF(cx, cy), stage_r, stage_r)
+
+        # CAPA 1: Halo Ambiental Amplio (Bleeding suave hacia el fondo oscuro)
+        ambient_halo_radius = current_radius * (2.8 + self.audio_level * 0.8)
+        ambient_grad = QRadialGradient(cx, cy - current_radius * 0.1, ambient_halo_radius)
+        halo_alpha = min(1.0, 0.35 * self.current_params["halo_strength"] + self.audio_level * 0.30)
+        ambient_grad.setColorAt(0.0, QColor(137, 206, 255, int(halo_alpha * 0.70 * 255)))
+        ambient_grad.setColorAt(0.35, QColor(79, 219, 200, int(halo_alpha * 0.45 * 255)))
+        ambient_grad.setColorAt(0.70, QColor(14, 165, 233, int(halo_alpha * 0.15 * 255)))
+        ambient_grad.setColorAt(1.0, QColor(3, 4, 9, 0))
+        painter.setBrush(ambient_grad)
+        painter.drawEllipse(QPointF(cx, cy - current_radius * 0.1), ambient_halo_radius, ambient_halo_radius)
+
+        # CAPA 2: Halo Cercano (Puente luminoso de alta intensidad)
+        near_halo_radius = current_radius * (1.6 + self.audio_level * 0.30)
+        near_grad = QRadialGradient(cx, cy, near_halo_radius)
+        near_alpha = min(1.0, 0.50 * self.current_params["halo_strength"] + self.audio_level * 0.25)
+        near_grad.setColorAt(0.0, QColor(137, 206, 255, int(near_alpha * 255)))
+        near_grad.setColorAt(0.50, QColor(113, 248, 228, int(near_alpha * 0.60 * 255)))
+        near_grad.setColorAt(1.0, QColor(7, 12, 21, 0))
+        painter.setBrush(near_grad)
+        painter.drawEllipse(QPointF(cx, cy), near_halo_radius, near_halo_radius)
+
+        # CAPA 3: Cuerpo Esférico Luminoso sin bordes duros
+        body_cx = cx + spec_drift_x * current_radius * 0.4
+        body_cy = cy + spec_drift_y * current_radius * 0.4
+        body_grad = QRadialGradient(body_cx, body_cy, current_radius * 1.08, body_cx, body_cy)
+        body_grad.setColorAt(0.0, QColor(230, 247, 255, 250))
+        body_grad.setColorAt(0.25, QColor(137, 206, 255, 217))
+        body_grad.setColorAt(0.65, QColor(79, 219, 200, 140))
+        body_grad.setColorAt(0.90, QColor(14, 165, 233, 64))
+        body_grad.setColorAt(1.0, QColor(0, 52, 77, 0))
+        painter.setBrush(body_grad)
+        painter.drawEllipse(QPointF(cx, cy), current_radius, current_radius)
+
+        # CAPA 4: 3 Anillos Orbitales Punteados en Rotación Continua
+        for i in range(3):
+            painter.save()
+            painter.translate(cx, cy)
+            angle = self.time_counter * (0.35 + i * 0.25) * (1.0 if i % 2 == 0 else -1.0)
+            painter.rotate(math.degrees(angle))
+            color = QColor(113, 248, 228, 130) if i == 1 else QColor(137, 206, 255, 110)
+            pen = QPen(color, 1.8 if i == 1 else 1.2)
+            pen.setDashPattern([6.0 + i * 4.0, 8.0 + i * 2.0])
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            r_ring = current_radius * (0.45 + i * 0.22 + self.audio_level * 0.08)
+            painter.drawEllipse(QPointF(0, 0), r_ring, r_ring * 0.88)
+            painter.restore()
+
+        # CAPA 5: Resplandor Especular Flotante (Sensación de cristal)
+        spec_x = cx - current_radius * 0.32 + spec_drift_x * current_radius * 0.5
+        spec_y = cy - current_radius * 0.32 + spec_drift_y * current_radius * 0.5
+        spec_radius = current_radius * (0.42 + self.audio_level * 0.15)
+        spec_grad = QRadialGradient(spec_x, spec_y, spec_radius)
+        spec_grad.setColorAt(0.0, QColor(255, 255, 255, 242))
+        spec_grad.setColorAt(0.40, QColor(201, 230, 255, 165))
+        spec_grad.setColorAt(1.0, QColor(137, 206, 255, 0))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(spec_grad)
+        painter.drawEllipse(QPointF(spec_x, spec_y), spec_radius, spec_radius)
+
+        # CAPA 6: Constelación de Nodos Fibonacci (conserva todas las pruebas unitarias y cálculo 3D)
         if self.state == VisualizerState.REPOSO:
-            breathing = 1.0 + 0.02 * math.sin(self.time_counter * 1.5)
-            current_base_radius = base_radius * breathing
-            radii_modifiers = np.full(
-                self.num_nodes, current_base_radius, dtype=np.float32
-            )
+            radii_modifiers = np.full(self.num_nodes, R, dtype=np.float32)
             theme_key = "cyan"
             pen_theme_key = "reposo"
-
         elif self.state == VisualizerState.ESCUCHANDO:
-            current_base_radius = base_radius
             node_bands = self.freq_bands[self.sphere.node_band_indices]
-            radii_modifiers = current_base_radius * (1.0 + node_bands * 0.50)
+            radii_modifiers = R * (1.0 + node_bands * 0.50)
             theme_key = "cyan"
             pen_theme_key = "escuchando"
-
         elif self.state == VisualizerState.HABLANDO:
             effective_pulse = max(self.speech_amplitude, 0.0)
             global_expansion = 1.0 + effective_pulse * 0.35
-            current_base_radius = base_radius * global_expansion
-            radii_modifiers = np.full(
-                self.num_nodes, current_base_radius, dtype=np.float32
-            )
+            radii_modifiers = np.full(self.num_nodes, R * global_expansion, dtype=np.float32)
             theme_key = "speaking"
             pen_theme_key = "hablando"
 
-        # 2. Proyección 3D -> 2D manual
         angles = (self.angle_x, self.angle_y, self.angle_z)
         coords_2d, z_depths, factors = self.sphere.project_and_rotate(
             angles=angles,
             radii_modifiers=radii_modifiers,
-            base_radius=current_base_radius,
-            center=center,
+            base_radius=R,
+            center=(cx, cy),
         )
 
-        # 3. Dibujar aristas agrupadas por nivel de profundidad
         edges = self.sphere.edges
         z_avg = (z_depths[edges[:, 0]] + z_depths[edges[:, 1]]) * 0.5
-        z_norm = np.clip((z_avg + current_base_radius) / (2.0 * current_base_radius + 1e-5), 0.0, 0.99)
+        z_norm = np.clip((z_avg + R) / (2.0 * R + 1e-5), 0.0, 0.99)
         edge_tiers = (z_norm * self.NUM_DEPTH_TIERS).astype(np.int32)
 
-        pens = self.tiered_pens[pen_theme_key]
-        for b in range(self.NUM_DEPTH_TIERS):
-            painter.setPen(pens[b])
-            mask = np.where(edge_tiers == b)[0]
-            for idx in mask:
-                u, v = edges[idx]
-                painter.drawLine(
-                    int(coords_2d[u, 0]), int(coords_2d[u, 1]),
-                    int(coords_2d[v, 0]), int(coords_2d[v, 1]),
-                )
+        # CAPA 6: Constelación de Nodos Fibonacci (solo si se activa explícitamente en modo wireframe)
+        if getattr(self, "show_wireframe", False):
+            pens = self.tiered_pens[pen_theme_key]
+            for b in range(self.NUM_DEPTH_TIERS):
+                painter.setPen(pens[b])
+                mask = np.where(edge_tiers == b)[0]
+                for idx in mask:
+                    u, v = edges[idx]
+                    painter.drawLine(
+                        int(coords_2d[u, 0]), int(coords_2d[u, 1]),
+                        int(coords_2d[v, 0]), int(coords_2d[v, 1]),
+                    )
 
-        # 4. Dibujar nodos mediante sprites precomputados por nivel de profundidad
-        node_norm = np.clip((z_depths + current_base_radius) / (2.0 * current_base_radius + 1e-5), 0.0, 0.99)
-        node_tiers = (node_norm * self.NUM_DEPTH_TIERS).astype(np.int32)
-        sprites = self.glow_sprites[theme_key]
+            node_norm = np.clip((z_depths + R) / (2.0 * R + 1e-5), 0.0, 0.99)
+            node_tiers = (node_norm * self.NUM_DEPTH_TIERS).astype(np.int32)
+            sprites = self.glow_sprites[theme_key]
 
-        order = np.argsort(z_depths)  # Del fondo hacia el frente
-        for idx in order:
-            t_idx = node_tiers[idx]
-            r, pix = sprites[t_idx]
-            x = int(coords_2d[idx, 0]) - r
-            y = int(coords_2d[idx, 1]) - r
-            painter.drawPixmap(x, y, pix)
+            order = np.argsort(z_depths)
+            for idx in order:
+                t_idx = node_tiers[idx]
+                r_sp, pix = sprites[t_idx]
+                x = int(coords_2d[idx, 0]) - r_sp
+                y = int(coords_2d[idx, 1]) - r_sp
+                painter.drawPixmap(x, y, pix)
 
     def benchmark_fps(
         self,

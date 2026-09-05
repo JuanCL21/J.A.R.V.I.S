@@ -33,8 +33,13 @@ from core.plugin_installer import (
     load_curated_catalog,
     resolve_git_ref,
     resolve_catalog_path,
+    CuratedPluginInfo,
+    InstallResult,
+    list_curated_plugins,
+    validate_source_url,
 )
 from core.plugin_registry import PluginRegistry
+
 
 
 @pytest.fixture
@@ -236,8 +241,22 @@ def test_install_from_catalog_signature_strictly_accepts_only_plugin_id(test_env
 
     # 3. Invocación legítima exitosa
     res = install_from_catalog("toy")
-    assert res["plugin_id"] == "toy"
-    assert res["status"] == "curado"
+    assert isinstance(res, InstallResult)
+    assert res.success is True
+    assert res.plugin_id == "toy"
+    assert "instaló correctamente" in res.message.lower()
+
+    # REGLA DE SEGURIDAD ESTRICTA: La UI no recibe commit_hash, source_url, reviewed_by ni status
+    assert not hasattr(res, "status")
+    assert not hasattr(res, "commit_hash")
+    assert not hasattr(res, "source_url")
+    assert not hasattr(res, "reviewed_by")
+
+    # En el backend, la base de datos sí fue actualizada a status='curado'
+    installed = test_env["registry"].get_plugin("toy")
+    assert installed is not None
+    assert installed["status"] == "curado"
+
 
 
 # ============================================================================
@@ -418,12 +437,16 @@ def test_resolve_git_ref_adversarial_rejects_ext_scheme_and_non_https(monkeypatc
         "ext::sh -c touch /tmp/pwned",
         "ext::cat /etc/passwd",
         "ssh://git@github.com/org/repo.git",
+        "ssh://-oProxyCommand=sh/repo.git",
+        "ssh://user@host:port/repo.git",
         "git://github.com/org/repo.git",
         "file:///tmp/repo.git",
+        "file:///etc/passwd",
         "http://github.com/org/repo.git",
         "ftp://github.com/org/repo.git",
         "HTTPS://github.com/org/repo.git",
         "https:github.com/org/repo.git",
+        "https://evil-untrusted-host.com/org/repo.git",
         "git::https://github.com/org/repo.git",
         "https://github.com/org/repo.git::ext",
         "/nonexistent/local/dir/that/does/not/exist",
@@ -432,6 +455,16 @@ def test_resolve_git_ref_adversarial_rejects_ext_scheme_and_non_https(monkeypatc
     for bad_url in disallowed_urls:
         with pytest.raises(ValueError):
             resolve_git_ref(source_url=bad_url, ref="HEAD")
+        with pytest.raises(ValueError):
+            validate_source_url(bad_url)
+
+
+def test_validate_source_url_accepts_authorized_hosts_and_local_dirs(local_git_repo: Path):
+    """Verifica que validate_source_url acepte dominios autorizados y directorios locales absolutos."""
+    validate_source_url("https://github.com/jarvis-plugins/toy-plugin.git")
+    validate_source_url("https://gitlab.com/jarvis-plugins/sample-plugin.git")
+    validate_source_url(str(local_git_repo.resolve()))
+
 
 
 def test_resolve_git_ref_adversarial_still_allows_local_test_repo(local_git_repo: Path):
@@ -442,4 +475,92 @@ def test_resolve_git_ref_adversarial_still_allows_local_test_repo(local_git_repo
     """
     resolved_commit = resolve_git_ref(source_url=str(local_git_repo), ref="HEAD")
     assert re.match(r"^[0-9a-f]{40}$", resolved_commit)
+
+
+# ============================================================================
+# TESTS: Funciones Públicas del Catálogo Curado para la UI
+# ============================================================================
+
+def test_list_curated_plugins_returns_clean_objects_and_reflects_installation(test_env):
+    """
+    Verifica que list_curated_plugins():
+    1. Devuelve una lista de CuratedPluginInfo con solo los campos permitidos para la UI.
+    2. No filtra datos técnicos ni de auditoría (commit_hash, source_url, reviewed_by, status).
+    3. Refleja fielmente el estado de instalación (is_installed: False -> True tras instalar).
+    """
+    # Antes de instalar: ningún plugin curado está instalado en test_env
+    plugins_before = list_curated_plugins()
+    assert len(plugins_before) == 2
+    ids_before = {p.plugin_id: p for p in plugins_before}
+
+    assert "toy" in ids_before
+    assert "open_interpreter" in ids_before
+
+    toy_info = ids_before["toy"]
+    assert isinstance(toy_info, CuratedPluginInfo)
+    assert toy_info.name == "Toy Plugin"
+    assert toy_info.icon == "clock-outline"
+    assert toy_info.description == "Plugin de diagnóstico básico"
+    assert toy_info.is_installed is False
+
+    # REGLA NO NEGOCIABLE: No debe contener commit_hash, source_url, reviewed_by ni status
+    for p in plugins_before:
+        assert not hasattr(p, "commit_hash")
+        assert not hasattr(p, "source_url")
+        assert not hasattr(p, "reviewed_by")
+        assert not hasattr(p, "status")
+        # Tampoco vía dict / getitem
+        assert "commit_hash" not in p.to_dict()
+        assert "source_url" not in p.to_dict()
+        assert "reviewed_by" not in p.to_dict()
+        assert "status" not in p.to_dict()
+
+    # Instalar toy desde el catálogo
+    install_res = install_from_catalog("toy")
+    assert install_res.success is True
+
+    # Después de instalar: toy debe figurar como is_installed=True y open_interpreter como False
+    plugins_after = list_curated_plugins()
+    ids_after = {p.plugin_id: p for p in plugins_after}
+
+    assert ids_after["toy"].is_installed is True
+    assert ids_after["open_interpreter"].is_installed is False
+
+
+def test_install_from_catalog_already_installed_handled_gracefully(test_env):
+    """
+    Verifica que si un plugin ya está instalado:
+    1. install_from_catalog() lo maneja con gracia (sin excepciones ni re-instalación silenciosa).
+    2. Devuelve un InstallResult claro con mensaje legible para el usuario.
+    """
+    # Primera instalación exitosa
+    res1 = install_from_catalog("toy")
+    assert res1.success is True
+    assert res1.plugin_id == "toy"
+
+    # Segunda instalación (ya instalado)
+    res2 = install_from_catalog("toy")
+    assert res2.success is False
+    assert res2.plugin_id == "toy"
+    assert "ya se encuentra instalado" in res2.message.lower()
+
+    # Verificar que no hubo excepción y no se alteró la auditoría original
+    reg_entry = test_env["registry"].get_plugin("toy")
+    assert reg_entry["reviewed_by"] == "auditor_seguridad_principal"
+
+
+def test_install_from_catalog_error_handling_user_friendly(test_env):
+    """
+    Verifica el manejo de errores con mensajes comprensibles para el usuario final.
+    """
+    # Plugin no existente en el catálogo
+    res_unknown = install_from_catalog("non_existent_plugin")
+    assert res_unknown.success is False
+    assert "no existe" in res_unknown.message.lower()
+
+    # Plugin id con guión inicial (rechazo fail-closed)
+    res_dash = install_from_catalog("-malicious_id")
+    assert res_dash.success is False
+    assert "inválido" in res_dash.message.lower()
+
 
